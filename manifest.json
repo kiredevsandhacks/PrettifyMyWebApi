@@ -12,7 +12,14 @@
         "activeTab",
         "scripting"
     ],
-    "optional_host_permissions": [
-        "*://*/*"
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "eventHandler.js"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
     ]
 }

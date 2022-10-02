@@ -1,4 +1,4 @@
-javascript: (async function () {
+(async function () {
     const formattedValueType = '@OData.Community.Display.V1.FormattedValue';
     const navigationPropertyType = '@Microsoft.Dynamics.CRM.associatednavigationproperty';
     const lookupType = '@Microsoft.Dynamics.CRM.lookuplogicalname';
@@ -6,14 +6,21 @@ javascript: (async function () {
     const replacedQuote = '__~~__REPLACEDQUOTE__~~__';
     const replacedComma = '__~~__REPLACEDCOMMA__~~__';
 
-    const apiUrl = /\/api\/data\/v[0-9][0-9]?.[0-9]\//.exec(window.location.pathname)[0];
+    let apiUrl = '';
+
+    try {
+        apiUrl = /\/api\/data\/v[0-9][0-9]?.[0-9]\//.exec(window.location.pathname)[0];
+    } catch {
+        alert('It seems you are not viewing a form or the dataverse odata web api. If you think this is an error, please contact the author of the extension and he will fix it asap.');
+        return;
+    }
     const retrievedPluralNames = {};
 
     async function odataFetch(url) {
         const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
 
         return await response.json();
-    } 
+    }
 
     async function retrievePluralName(logicalName) {
         if (retrievedPluralNames.hasOwnProperty(logicalName)) {
@@ -459,6 +466,7 @@ javascript: (async function () {
             const originalValue = window.originalResponseCopy[input.dataset.fieldname];
             const dataType = input.dataset.datatype;
             const inputValue = input.value;
+            const fieldName = input.dataset.fieldname;
 
             let value = '';
             if (dataType === 'string' || dataType === 'memo') {
@@ -470,7 +478,7 @@ javascript: (async function () {
             } else if (dataType === 'option') {
                 if (!inputValue) {
                     // the select needs to contain a value always, if not, an error happened
-                    alert('there was an error parsing the field ' + input.dataset.fieldname);
+                    alert('there was an error parsing the field ' + fieldName);
                     return;
                 }
                 if (inputValue === 'null') {
@@ -484,12 +492,12 @@ javascript: (async function () {
                 } else {
                     value = parseInt(inputValue);
                     if (isNaN(value)) {
-                        alert(input.dataset.fieldname + ' is a whole number. The value ' + inputValue + ' is not compatible.');
+                        alert(fieldName + ' is a whole number. The value ' + inputValue + ' is not compatible.');
                         return;
                     }
 
                     if (/^-?\d+$/.test(inputValue) === false) {
-                        alert(input.dataset.fieldname + ' is a whole number. The value ' + inputValue + ' is not compatible.');
+                        alert(fieldName + ' is a whole number. The value ' + inputValue + ' is not compatible.');
                         return;
                     }
                 }
@@ -498,25 +506,25 @@ javascript: (async function () {
                     value = null;
                 } else {
                     if (inputValue.includes(',')) {
-                        alert(input.dataset.fieldname + ' is a decimal number and contains a comma (,). Use a dot (.) as the separator.');
+                        alert(fieldName + ' is a decimal number and contains a comma (,). Use a dot (.) as the separator.');
                         return;
                     }
 
                     value = parseFloat(inputValue);
                     if (isNaN(value)) {
-                        alert(input.dataset.fieldname + ' is a decimal number. The value ' + inputValue + ' is not compatible.');
+                        alert(fieldName + ' is a decimal number. The value ' + inputValue + ' is not compatible.');
                         return;
                     }
 
                     if (/^-?[0-9]\d*(\.\d+)?$/.test(inputValue) === false) {
-                        alert(input.dataset.fieldname + ' is a decimal number. The value ' + inputValue + ' is not compatible.');
+                        alert(fieldName + ' is a decimal number. The value ' + inputValue + ' is not compatible.');
                         return;
                     }
                 }
             } else if (dataType === 'bool') {
                 if (!inputValue) {
                     // the select needs to contain a value always, if not, an error happened
-                    alert('there was an error parsing the field ' + input.dataset.fieldname);
+                    alert('there was an error parsing the field ' + fieldName);
                     return;
                 }
                 if (inputValue === 'null') {
@@ -528,14 +536,20 @@ javascript: (async function () {
                     } else if (rawValue === 'false') {
                         value = false;
                     } else {
-                        alert('there was an error parsing the field ' + input.dataset.fieldname);
+                        alert('there was an error parsing the field ' + fieldName);
                         return;
                     }
                 }
             }
 
             if (value !== originalValue && !(value === '' && originalValue == null)) {
-                changedFields[input.dataset.fieldname] = value;
+                if (dataType === 'memo') {
+                    if (originalValue.replaceAll('\r\n', '\n') !== value) {
+                        changedFields[fieldName] = value;
+                    }
+                } else {
+                    changedFields[fieldName] = value;
+                }
             }
         }
 
@@ -573,7 +587,7 @@ javascript: (async function () {
         });
 
         if (response.ok) {
-            await start();
+            await makeItPretty();
         } else {
             const errorText = await response.text();
             console.error(errorText);
@@ -589,7 +603,7 @@ javascript: (async function () {
         return stringContains(key, formattedValueType) || stringContains(key, navigationPropertyType) || stringContains(key, lookupType);
     }
 
-    async function replaceJsonAsync(jsonObj, htmlElement, pluralName, generateEditLink) {
+    async function prettifyWebApi(jsonObj, htmlElement, pluralName, generateEditLink) {
         const isMultiple = (jsonObj.value && Array.isArray(jsonObj.value));
 
         const result = await retrieveLogicalNameFromPluralNameAsync(pluralName);
@@ -610,7 +624,7 @@ javascript: (async function () {
             jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, result.primaryIdAttribute, generateEditLink);
         }
 
-        let json = JSON.stringify(jsonObj, undefined, 2);
+        let json = JSON.stringify(jsonObj, undefined, 3);
 
         json = json.replaceAll('"', '').replaceAll(replacedQuote, escapeHtml('"'));
         json = json.replaceAll(',', '').replaceAll(replacedComma, ',');
@@ -672,7 +686,7 @@ javascript: (async function () {
         undoAllLink.innerText = 'Cancel';
         undoAllLink.href = '#';
 
-        undoAllLink.onclick = start;
+        undoAllLink.onclick = makeItPretty;
 
         editMenu.appendChild(undoAllLink);
 
@@ -720,7 +734,7 @@ javascript: (async function () {
 
         const response = await odataFetch(url);
 
-        await replaceJsonAsync(response, newDiv, pluralName, false);
+        await prettifyWebApi(response, newDiv, pluralName, false);
 
         const btn = document.createElement('button');
         btn.style = `
@@ -751,14 +765,14 @@ javascript: (async function () {
         document.body.scrollLeft = Number.MAX_SAFE_INTEGER;
     }
 
-    async function start() {
+    async function makeItPretty() {
         const response = await odataFetch(window.location.href);
 
         window.currentEntityPluralName = window.location.pathname.split('/').pop().split('(').shift();
 
         resetCSS();
 
-        await replaceJsonAsync(response, document.body, window.currentEntityPluralName, true);
+        await prettifyWebApi(response, document.body, window.currentEntityPluralName, true);
     }
 
     function resetCSS() {
@@ -791,5 +805,5 @@ javascript: (async function () {
         addcss(css);
     }
 
-    await start();
-}())
+    await makeItPretty();
+})()
