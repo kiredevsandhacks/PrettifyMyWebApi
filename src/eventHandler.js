@@ -32,8 +32,8 @@
     if (window.Xrm && window.Xrm.Page) {
         const newLocation = await getWebApiUrl();
 
-        window.postMessage({ appId: "edmmffgiccjoabgjnkoehhmkbpmflahe", action: "openInWebApi", url: newLocation });
+        window.postMessage({ action: "openInWebApi", url: newLocation });
     } else if (/\/api\/data\/v[0-9][0-9]?.[0-9]\//.test(window.location.pathname)) {
-        window.postMessage({ appId: "edmmffgiccjoabgjnkoehhmkbpmflahe", action: "prettifyWebApi" });
+        window.postMessage({ action: "prettifyWebApi" });
     }
 })()

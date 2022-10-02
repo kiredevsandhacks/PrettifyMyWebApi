@@ -5,9 +5,9 @@ scriptTag.type = "text/javascript";
 document.head.appendChild(scriptTag);
 
 function handler(event) {
-    if (event.source === window && event.data.appId === 'edmmffgiccjoabgjnkoehhmkbpmflahe') {
+    if (event.source === window) {
         if (event.data.action === 'prettifyWebApi') {
-            chrome.runtime.sendMessage("edmmffgiccjoabgjnkoehhmkbpmflahe", event.data);
+            chrome.runtime.sendMessage(event.data);
         } else if (event.data.action === 'openInWebApi') {
             if (event.data.url.startsWith('https://')) {
                 window.open(event.data.url);
