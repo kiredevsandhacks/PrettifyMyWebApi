@@ -185,7 +185,7 @@
         return `<span style='display: inline-flex;' class='${escapeHtml(cls)}'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div></span>`;
     }
 
-    async function enrichObjectWithHtml(jsonObj, logicalName, primaryIdAttribute, isSingleRecord) {
+    async function enrichObjectWithHtml(jsonObj, logicalName, primaryIdAttribute, isSingleRecord, isNested) {
         const recordId = jsonObj[primaryIdAttribute]; // we need to get this value before parsing or else it will contain html
 
         const ordered = Object.keys(jsonObj).sort(
@@ -212,7 +212,8 @@
             let value = ordered[key];
 
             if (typeof (value) === "object" && value != null) {
-                ordered[key] = value = await enrichObjectWithHtml(value);
+                debugger;
+                ordered[key] = value = await enrichObjectWithHtml(value, null, null, null, true);
                 continue;
             }
 
@@ -261,17 +262,20 @@
         }
 
         const newObj = {};
-        if (logicalName != null && logicalName !== '' && recordId != null && recordId !== '') {
-            newObj["Form Link"] = createLinkSpan('link', generateFormUrlAnchor(logicalName, recordId));
 
-            if (isSingleRecord) {
-                newObj["Edit this record"] = createLinkSpan('link', await generateEditAnchor(logicalName, recordId));
+        if (!isNested) {
+            if (logicalName != null && logicalName !== '' && recordId != null && recordId !== '') {
+                newObj["Form Link"] = createLinkSpan('link', generateFormUrlAnchor(logicalName, recordId));
+
+                if (isSingleRecord) {
+                    newObj["Edit this record"] = createLinkSpan('link', await generateEditAnchor(logicalName, recordId));
+                } else {
+                    newObj["Web Api Link"] = createLinkSpan('link', generateWebApiAnchor(recordId));
+                }
             } else {
-                newObj["Web Api Link"] = createLinkSpan('link', generateWebApiAnchor(recordId));
+                newObj["Form Link"] = "Could not generate link";
+                newObj["Web Api Link"] = "Could not generate link";
             }
-        } else {
-            newObj["Form Link"] = "Could not generate link";
-            newObj["Web Api Link"] = "Could not generate link";
         }
 
         const combinedJsonObj = Object.assign(newObj, ordered);
@@ -615,13 +619,13 @@
             delete jsonObj.value;
 
             for (const key in jsonObj[valueKeyWithCount]) {
-                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, result.primaryIdAttribute, false);
+                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, result.primaryIdAttribute, false, false);
             }
         } else {
             if (generateEditLink) {
                 window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
             }
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, result.primaryIdAttribute, generateEditLink);
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, result.primaryIdAttribute, generateEditLink, false);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
