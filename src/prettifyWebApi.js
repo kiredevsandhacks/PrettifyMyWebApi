@@ -212,7 +212,7 @@
             let value = ordered[key];
 
             if (typeof (value) === "object" && value != null) {
-                await enrichObjectWithHtml(value);
+                ordered[key] = value = await enrichObjectWithHtml(value);
                 continue;
             }
 
