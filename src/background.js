@@ -9,14 +9,13 @@ async function prettifyWebApi(request, sender, sendResponse) {
   });
 }
 
-chrome.runtime.onInstalled.addListener(function (details) { 
+chrome.action.onClicked.addListener(async function (tab) {
+  chrome.runtime.onMessage.removeListener(prettifyWebApi);
   chrome.runtime.onMessage.addListener(prettifyWebApi);
 
-  chrome.action.onClicked.addListener(async function (tab) {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content.js']
-    });
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ['content.js']
   });
-
 });
+
