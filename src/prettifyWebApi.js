@@ -401,7 +401,7 @@
 
     function setInputMetadata(input, container, datatype) {
         input.classList.add('enabledInputField');
-        input.dataset['fieldName'] = container.dataset.fieldname;
+        input.dataset['fieldname'] = container.dataset.fieldname;
         input.dataset['datatype'] = datatype;
 
         container.parentElement.append(input);
