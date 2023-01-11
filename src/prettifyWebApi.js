@@ -188,32 +188,37 @@
     async function enrichObjectWithHtml(jsonObj, logicalName, primaryIdAttribute, isSingleRecord, isNested) {
         const recordId = jsonObj[primaryIdAttribute]; // we need to get this value before parsing or else it will contain html
 
-        const ordered = Object.keys(jsonObj).sort(
-            (obj1, obj2) => {
-                let obj1Underscore = obj1.startsWith('_');
-                let obj2Underscore = obj2.startsWith('_');
-                if (obj1Underscore && !obj2Underscore) {
-                    return 1;
-                } else if (!obj1Underscore && obj2Underscore) {
-                    return -1;
-                }
-
-                else return obj1 > obj2 ? 1 : -1;
-
-            }).reduce(
-                (obj, key) => {
-                    obj[key] = jsonObj[key];
-                    return obj;
-                },
-                {}
-            );
+        const ordered = orderProperties(jsonObj);
 
         for (let key in ordered) {
             let value = ordered[key];
 
-            if (typeof (value) === "object" && value != null) {
-                debugger;
-                ordered[key] = value = await enrichObjectWithHtml(value, null, null, null, true);
+            const cls = determineType(value);
+
+            if (Array.isArray(value)) {
+                ordered[key] = [];
+
+                if (Object.values(value).every(v => typeof (v) === 'object')) {
+                    for (let nestedKey in value) {
+                        let nestedValue = value[nestedKey];
+
+                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, true);
+                    }
+                }
+                else {
+                    // if every value is not an object, it an an array of primitives. We want to render as an array with formatted values, without numbers prepended
+                    for (let nestedKey in value) {
+                        let nestedValue = value[nestedKey];
+
+                        ordered[key].push(createSpan(cls, nestedValue));
+                    }
+                }
+
+                continue;
+            }
+
+            if (typeof (value) === 'object' && value != null) {
+                ordered[key] = await enrichObjectWithHtml(value, null, null, null, true);
                 continue;
             }
 
@@ -225,8 +230,6 @@
                 value = value.replaceAll('"', replacedQuote);
                 value = value.replaceAll(',', replacedComma);
             }
-
-            const cls = determineType(value);
 
             if (keyHasLookupAnnotation(key, ordered)) {
                 const formattedValueValue = ordered[key + formattedValueType];
@@ -262,19 +265,18 @@
         }
 
         const newObj = {};
-
         if (!isNested) {
             if (logicalName != null && logicalName !== '' && recordId != null && recordId !== '') {
-                newObj["Form Link"] = createLinkSpan('link', generateFormUrlAnchor(logicalName, recordId));
+                newObj['Form Link'] = createLinkSpan('link', generateFormUrlAnchor(logicalName, recordId));
 
                 if (isSingleRecord) {
-                    newObj["Edit this record"] = createLinkSpan('link', await generateEditAnchor(logicalName, recordId));
+                    newObj['Edit this record'] = createLinkSpan('link', await generateEditAnchor(logicalName, recordId));
                 } else {
-                    newObj["Web Api Link"] = createLinkSpan('link', generateWebApiAnchor(recordId));
+                    newObj['Web Api Link'] = createLinkSpan('link', generateWebApiAnchor(recordId));
                 }
-            } else {
-                newObj["Form Link"] = "Could not generate link";
-                newObj["Web Api Link"] = "Could not generate link";
+            } else if (logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
+                newObj['Form Link'] = 'Could not generate link';
+                newObj['Web Api Link'] = 'Could not generate link';
             }
         }
 
@@ -282,12 +284,34 @@
         return combinedJsonObj;
     }
 
+    function orderProperties(jsonObj) {
+        return Object.keys(jsonObj).sort(
+            (obj1, obj2) => {
+                let obj1Underscore = obj1.startsWith('_');
+                let obj2Underscore = obj2.startsWith('_');
+                if (obj1Underscore && !obj2Underscore) {
+                    return 1;
+                } else if (!obj1Underscore && obj2Underscore) {
+                    return -1;
+                }
+                else
+                    return obj1 > obj2 ? 1 : -1;
+
+            }).reduce(
+                (obj, key) => {
+                    obj[key] = jsonObj[key];
+                    return obj;
+                },
+                {}
+            );
+    }
+
     function setPreviewLinkClickHandlers() {
         const previewLinks = document.getElementsByClassName('previewLink');
 
         for (let previewLink of previewLinks) {
-            const pluralName = previewLink.attributes["data-pluralName"].value;
-            const newLocation = pluralName + "(" + previewLink.attributes["data-guid"].value + ")";
+            const pluralName = previewLink.attributes['data-pluralName'].value;
+            const newLocation = pluralName + '(' + previewLink.attributes['data-guid'].value + ')';
 
             previewLink.onclick = function () {
                 previewRecord(pluralName, newLocation);
@@ -299,9 +323,9 @@
         const editLinks = document.getElementsByClassName('editLink');
 
         for (let editLink of editLinks) {
-            const logicalName = editLink.attributes["data-logicalName"].value;
-            const pluralName = editLink.attributes["data-pluralName"].value;
-            const id = editLink.attributes["data-guid"].value;
+            const logicalName = editLink.attributes['data-logicalName'].value;
+            const pluralName = editLink.attributes['data-pluralName'].value;
+            const id = editLink.attributes['data-guid'].value;
 
             editLink.onclick = async function () {
                 await editRecord(logicalName, pluralName, id);
@@ -315,9 +339,9 @@
         let input;
 
         if (!multiLine) {
-            input = document.createElement("input");
+            input = document.createElement('input');
         } else {
-            input = document.createElement("textarea");
+            input = document.createElement('textarea');
         }
 
         input.value = value;
@@ -376,9 +400,9 @@
     }
 
     function setInputMetadata(input, container, datatype) {
-        input.classList.add("enabledInputField");
-        input.dataset["fieldname"] = container.dataset.fieldname;
-        input.dataset["datatype"] = datatype;
+        input.classList.add('enabledInputField');
+        input.dataset['fieldName'] = container.dataset.fieldname;
+        input.dataset['datatype'] = datatype;
 
         container.parentElement.append(input);
 
@@ -387,8 +411,8 @@
         }
 
         container.style.display = null;
-        container.classList.remove("containerNotEnabled");
-        container.classList.add("containerEnabled");
+        container.classList.remove('containerNotEnabled');
+        container.classList.add('containerEnabled');
     }
 
     async function editRecord(logicalName, pluralName, id) {
@@ -400,7 +424,7 @@
         const optionSetMetadata = await retrieveOptionSetMetadata(logicalName);
         const booleanMetadata = await retrieveBooleanFieldMetadata(logicalName);
 
-        const inputContainers = document.getElementsByClassName("mainPanel")[0].getElementsByClassName('inputContainer');
+        const inputContainers = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('inputContainer');
 
         for (let attribute of attributesMetadata) {
             for (let container of inputContainers) {
@@ -548,7 +572,7 @@
 
             if (value !== originalValue && !(value === '' && originalValue == null)) {
                 if (dataType === 'memo') {
-                    if (originalValue.replaceAll('\r\n', '\n') !== value) {
+                    if (originalValue?.replaceAll('\r\n', '\n') !== value) {
                         changedFields[fieldName] = value;
                     }
                 } else {
