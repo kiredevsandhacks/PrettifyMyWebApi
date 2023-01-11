@@ -257,7 +257,7 @@
                 delete ordered[key + formattedValueType];
             } else {
                 if (key === primaryIdAttribute) {
-                    ordered[key] = createSpan('primarykey', value);
+                    ordered[key] = '<b>' + createSpan('primarykey', value) + '</b>';
                 } else {
                     ordered[key] = createFieldSpan(cls, value, key);
                 }
