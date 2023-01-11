@@ -147,9 +147,9 @@
         return `<a target='_blank' href='${newLocation}'>Open in Form</a>`;
     }
 
-    function generateWebApiAnchor(guid) {
+    function generateWebApiAnchor(guid, pluralName) {
         const formattedGuid = guid.replace('{', '').replace('}', '');
-        const newLocation = apiUrl + escapeHtml(window.currentEntityPluralName) + '(' + escapeHtml(formattedGuid) + ')';
+        const newLocation = apiUrl + escapeHtml(pluralName) + '(' + escapeHtml(formattedGuid) + ')';
 
         return `<a target='_blank' href='${newLocation}'>Open in Web Api</a>`;
     }
@@ -185,7 +185,7 @@
         return `<span style='display: inline-flex;' class='${escapeHtml(cls)}'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div></span>`;
     }
 
-    async function enrichObjectWithHtml(jsonObj, logicalName, primaryIdAttribute, isSingleRecord, isNested) {
+    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested) {
         const recordId = jsonObj[primaryIdAttribute]; // we need to get this value before parsing or else it will contain html
 
         const ordered = orderProperties(jsonObj);
@@ -202,7 +202,7 @@
                     for (let nestedKey in value) {
                         let nestedValue = value[nestedKey];
 
-                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, true);
+                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, null, true);
                     }
                 }
                 else {
@@ -218,7 +218,7 @@
             }
 
             if (typeof (value) === 'object' && value != null) {
-                ordered[key] = await enrichObjectWithHtml(value, null, null, null, true);
+                ordered[key] = await enrichObjectWithHtml(value, null, null, null, null, true);
                 continue;
             }
 
@@ -272,7 +272,7 @@
                 if (isSingleRecord) {
                     newObj['Edit this record'] = createLinkSpan('link', await generateEditAnchor(logicalName, recordId));
                 } else {
-                    newObj['Web Api Link'] = createLinkSpan('link', generateWebApiAnchor(recordId));
+                    newObj['Web Api Link'] = createLinkSpan('link', generateWebApiAnchor(recordId, pluralName));
                 }
             } else if (logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
                 newObj['Form Link'] = 'Could not generate link';
@@ -643,13 +643,13 @@
             delete jsonObj.value;
 
             for (const key in jsonObj[valueKeyWithCount]) {
-                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, result.primaryIdAttribute, false, false);
+                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false);
             }
         } else {
             if (generateEditLink) {
                 window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
             }
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, result.primaryIdAttribute, generateEditLink, false);
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, generateEditLink, false);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
