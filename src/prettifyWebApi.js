@@ -767,18 +767,17 @@
         const btn = document.createElement('button');
         btn.style = `
             height: 30px;
-            width: 30px;
-            margin: 24px;
+            width: auto;
+            margin-right: 24px;
+            margin-top: 10px;
             position: absolute;
-            right: 30px;
-            background: transparent;
-            border: transparent;
+            right: 10px;
             cursor: pointer;
             padding:0;
             font-size:24;
             `
 
-        btn.innerHTML = '<span>×</span>';
+        btn.innerHTML = '<span>Close Preview</span>';
 
         btn.addEventListener('click', function () {
             if (document.getElementsByClassName('previewPanel').length === 1) {
