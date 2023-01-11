@@ -244,7 +244,7 @@
                     createLinkSpan('link', newApiUrl) + ' : ' +
                     createLinkSpan('link', formUrl) + ' : ' +
                     createLinkSpan('link', previewUrl),
-                    createSpan(determineType(formattedValueValue), formattedValueValue),
+                    createSpan(determineType(formattedValueValue), 'Name: ' + formattedValueValue),
                     createSpan(determineType(lookupTypeValue), 'LogicalName: ' + lookupTypeValue),
                     createSpan(determineType(navigationPropertyValue), 'NavigationProperty: ' + navigationPropertyValue)
                 ];
