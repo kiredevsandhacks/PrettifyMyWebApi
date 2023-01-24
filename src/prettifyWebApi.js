@@ -83,7 +83,7 @@
         return json.value;
     }
 
-    var entityMap = {
+    const entityMap = {
         '&': '&amp;',
         '<': '&lt;',
         '>': '&gt;',
@@ -680,7 +680,7 @@
         json = json.replaceAll(',', '').replaceAll(replacedComma, ',');
 
         htmlElement.innerText = '';
-        var pre = document.createElement('pre');
+        const pre = document.createElement('pre');
         if (generateEditLink) {
             pre.classList.add('mainPanel');
         }
@@ -704,7 +704,7 @@
             changes.push(change);
         }
 
-        const table = tableFromArray(changes);
+        const table = tableFromChanges(changes);
 
         // disable all stuff to prevent edits after previewing
         const inputs = document.getElementsByTagName('input');
@@ -812,34 +812,39 @@
     }
 
     function addHeaders(table, keys) {
-        var header = table.createTHead();
-        var row = header.insertRow(0);
-        for (var i = 0; i < keys.length; i++) {
-            var cell = row.insertCell();
+        const header = table.createTHead();
+        const row = header.insertRow(0);
+        for (let i = 0; i < keys.length; i++) {
+            const cell = row.insertCell();
             cell.appendChild(document.createTextNode(keys[i]));
         }
     }
 
-    function tableFromArray(array) {
-        var table = document.createElement('table');
+    function tableFromChanges(changes) {
+        const table = document.createElement('table');
         table.id = 'previewTable';
 
-        if (array.length === 0) {
+        if (changes.length === 0) {
             return table;
         }
 
         // create the table body
-        for (var i = 0; i < array.length; i++) {
-            var child = array[i];
-            var row = table.insertRow();
-            Object.keys(child).forEach(function (k) {
-                var cell = row.insertCell();
-                cell.appendChild(document.createTextNode(child[k]));
+        for (let i = 0; i < changes.length; i++) {
+            const change = changes[i];
+            const row = table.insertRow();
+            Object.keys(change).forEach(function (k) {
+                const cell = row.insertCell();
+                let value = change[k];
+
+                if (value === null) {
+                    value = '(empty)';
+                }
+                cell.appendChild(document.createTextNode(value));
             })
         }
 
         // add the header last to prevent issues with the body going into the header when the body is empty
-        var header = array[0];
+        const header = changes[0];
         addHeaders(table, Object.keys(header));
 
         return table;
