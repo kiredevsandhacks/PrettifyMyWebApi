@@ -1,3 +1,12 @@
+function handleCopy(element) {
+    navigator.clipboard.writeText(element.parentElement.innerText).then(() => {
+        console.log('Content copied to clipboard');
+        /* Resolved - text copied to clipboard successfully */
+    }, () => {
+        alert('Failed to copy');
+    });
+}
+
 (async function () {
     const formattedValueType = '@OData.Community.Display.V1.FormattedValue';
     const navigationPropertyType = '@Microsoft.Dynamics.CRM.associatednavigationproperty';
@@ -5,6 +14,10 @@
 
     const replacedQuote = '__~~__REPLACEDQUOTE__~~__';
     const replacedComma = '__~~__REPLACEDCOMMA__~~__';
+
+    const clipBoardIcon = `<svg style='width:16px;position:absolute' viewBox='0 0 24 24'>
+    <path fill='currentColor' d='M19,3H14.82C14.25,1.44 12.53,0.64 11,1.2C10.14,1.5 9.5,2.16 9.18,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M12,3A1,1 0 0,1 13,4A1,1 0 0,1 12,5A1,1 0 0,1 11,4A1,1 0 0,1 12,3M7,7H17V5H19V19H5V5H7V7M17,11H7V9H17V11M15,15H7V13H15V15Z' />
+</svg>`.replaceAll(',', replacedComma); // need to 'escape' the commas because they cause issues with the JSON string cleanup code 
 
     let apiUrl = '';
 
@@ -169,20 +182,28 @@
     }
 
     function createSpan(cls, value) {
-        return `<span class='${escapeHtml(cls)}'>${escapeHtml(value)}</span>`;
+        return `<span class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<span class='copyButton' onclick='handleCopy(this)'>` + clipBoardIcon + `</span></span>`;
     }
 
     function createLinkSpan(cls, value) {
-        return `<span class='${escapeHtml(cls)}'>${value}</span>`;
+        return `<span class='${escapeHtml(cls)} hover'>${value}</span>`;
     }
 
     function createFieldSpan(cls, value, fieldName) {
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)}'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton' onclick='handleCopy(this)'>` + clipBoardIcon + `</span></span>`;
     }
 
     function createOptionSetSpan(cls, value, fieldName, formattedValue) {
-        const insertedValue = value + ' : ' + formattedValue;
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)}'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div></span>`;
+        let insertedValue = '';
+
+        // toString the value because it can be a number. The formattedValue is always a string
+        if (value?.toString() !== formattedValue) {
+            insertedValue = value + ' : ' + formattedValue;
+        } else {
+            insertedValue = value;
+        }
+
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton' onclick='handleCopy(this)'>` + clipBoardIcon + `</span></span>`;
     }
 
     async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested) {
@@ -485,6 +506,9 @@
                 submitLink.style.display = 'none';
             }
         }
+
+        // remove all hover handlers as they mess up the foratting and are not wanted in the editing context
+        Array.from(document.querySelectorAll('.hover')).forEach((el) => el.classList.remove('hover'));
     }
 
     async function submitEdit(pluralName, id) {
@@ -824,9 +848,27 @@
                 margin: 0 0 0 8px;
             }
 
+            span {
+                margin-right: 40px;
+            }
+
             option:empty {
               display:none;
             }
+
+            .copyButton {
+              color:dimgray;
+              display: none;
+            }           
+            
+            .hover:hover .copyButton {
+              display: unset;
+            }
+
+            .hover:.copyButton {
+                color: red;
+            }
+              
             `
 
         addcss(css);
