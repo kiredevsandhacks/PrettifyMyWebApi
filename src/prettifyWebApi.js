@@ -1,12 +1,3 @@
-function handleCopy(element) {
-    navigator.clipboard.writeText(element.parentElement.innerText).then(() => {
-        console.log('Content copied to clipboard');
-        /* Resolved - text copied to clipboard successfully */
-    }, () => {
-        alert('Failed to copy');
-    });
-}
-
 (async function () {
     const formattedValueType = '@OData.Community.Display.V1.FormattedValue';
     const navigationPropertyType = '@Microsoft.Dynamics.CRM.associatednavigationproperty';
@@ -182,7 +173,7 @@ function handleCopy(element) {
     }
 
     function createSpan(cls, value) {
-        return `<span class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<span class='copyButton' onclick='handleCopy(this)'>` + clipBoardIcon + `</span></span>`;
+        return `<span class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
     function createLinkSpan(cls, value) {
@@ -190,7 +181,7 @@ function handleCopy(element) {
     }
 
     function createFieldSpan(cls, value, fieldName) {
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton' onclick='handleCopy(this)'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
     function createOptionSetSpan(cls, value, fieldName, formattedValue) {
@@ -203,7 +194,7 @@ function handleCopy(element) {
             insertedValue = value;
         }
 
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton' onclick='handleCopy(this)'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
     async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested) {
@@ -325,6 +316,17 @@ function handleCopy(element) {
                 },
                 {}
             );
+    }
+
+    function setCopyToClipboardHandlers() {
+        Array.from(document.querySelectorAll('.copyButton')).forEach((el) => el.onclick = (element) => {
+            navigator.clipboard.writeText(el.parentElement.innerText).then(() => {
+                console.log('Content copied to clipboard');
+            }, () => {
+                alert('Failed to copy');
+            });
+        }
+        );
     }
 
     function setPreviewLinkClickHandlers() {
@@ -495,16 +497,10 @@ function handleCopy(element) {
         const editMenuDiv = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('editMenuDiv')[0];
         editMenuDiv.style.display = 'inline';
 
-        const previewChangesBeforeSaving = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('previewChangesBeforeSavingBox')[0].checked;
-
         const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
         submitLink.style.display = null;
         submitLink.onclick = async function () {
             await submitEdit(pluralName, id);
-
-            if (!!previewChangesBeforeSaving) {
-                submitLink.style.display = 'none';
-            }
         }
 
         // remove all hover handlers as they mess up the foratting and are not wanted in the editing context
@@ -606,9 +602,11 @@ function handleCopy(element) {
         }
 
         const previewChangesBeforeSaving = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('previewChangesBeforeSavingBox')[0].checked;
+        const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
 
         if (!!previewChangesBeforeSaving) {
             previewChanges(changedFields, pluralName, id);
+            submitLink.style.display = 'none';
             return;
         }
 
@@ -689,6 +687,7 @@ function handleCopy(element) {
         htmlElement.appendChild(pre).innerHTML = json;
         setPreviewLinkClickHandlers();
         setEditLinkClickHandlers();
+        setCopyToClipboardHandlers();
     }
 
     function previewChanges(changedFields, pluralName, id) {
@@ -849,7 +848,8 @@ function handleCopy(element) {
             }
 
             span {
-                margin-right: 40px;
+                margin-right: 24px;
+                padding-right: 16px;
             }
 
             option:empty {
@@ -865,10 +865,19 @@ function handleCopy(element) {
               display: unset;
             }
 
-            .hover:.copyButton {
-                color: red;
+            .copyButton:hover {
+                color: black;
+                cursor: pointer;
             }
-              
+
+            .copyButton:active {
+                color: green;
+            }             
+
+            .link {
+                margin:0;
+                padding:0;
+            }
             `
 
         addcss(css);
