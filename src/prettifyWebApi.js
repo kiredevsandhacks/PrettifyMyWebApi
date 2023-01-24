@@ -804,9 +804,10 @@
             cursor: pointer;
             padding:0;
             font-size:24;
+            padding: 0px 4px 0px 4px;
             `
 
-        btn.innerHTML = '<span>Close Preview</span>';
+        btn.innerHTML = '<div>Close Preview</div>';
 
         btn.addEventListener('click', function () {
             if (document.getElementsByClassName('previewPanel').length === 1) {
