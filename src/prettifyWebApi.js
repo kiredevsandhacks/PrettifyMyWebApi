@@ -691,29 +691,20 @@
     }
 
     function previewChanges(changedFields, pluralName, id) {
-        const previewContainer = document.createElement('textarea');
-        previewContainer.style.width = '500px';
-        previewContainer.style.height = '300px';
-        previewContainer.disabled = true;
+        const changes = [];
 
-        let previewText = '';
         for (let key in changedFields) {
+            const change = {};
             const originalValue = window.originalResponseCopy[key];
             const updatedValue = changedFields[key];
-            previewText += key + ': \n';
 
-            if (originalValue === null) { // literal null check. Remove double quotes for clear communication to the user that is an actuall null and not the string "null"
-                previewText += 'old: ' + originalValue + '\n';
-            } else {
-                previewText += 'old: "' + originalValue + '"\n';
-            }
-
-            if (updatedValue === null) { // again literal check. Same reason.
-                previewText += 'new: ' + updatedValue + '\n';
-            } else {
-                previewText += 'new: "' + updatedValue + '"\n';
-            }
+            change.column = key;
+            change.old = originalValue;
+            change.new = updatedValue;
+            changes.push(change);
         }
+
+        const table = tableFromArray(changes);
 
         // disable all stuff to prevent edits after previewing
         const inputs = document.getElementsByTagName('input');
@@ -729,11 +720,9 @@
             textareas[i].disabled = true;
         }
 
-        previewContainer.value = previewText;
-
         const editMenu = document.getElementById('previewChangesDiv');
         editMenu.innerHTML = '  ';
-        editMenu.appendChild(previewContainer);
+        editMenu.appendChild(table);
 
         const lineBreak = document.createElement('br');
         editMenu.appendChild(lineBreak);
@@ -819,7 +808,41 @@
 
         newDiv.firstChild.insertBefore(btn, newDiv.firstChild.firstChild);
 
-        document.body.scrollLeft = Number.MAX_SAFE_INTEGER;
+        newDiv.scrollIntoView();
+    }
+
+    function addHeaders(table, keys) {
+        var header = table.createTHead();
+        var row = header.insertRow(0);
+        for (var i = 0; i < keys.length; i++) {
+            var cell = row.insertCell();
+            cell.appendChild(document.createTextNode(keys[i]));
+        }
+    }
+
+    function tableFromArray(array) {
+        var table = document.createElement('table');
+        table.id = 'previewTable';
+
+        if (array.length === 0) {
+            return table;
+        }
+
+        // create the table body
+        for (var i = 0; i < array.length; i++) {
+            var child = array[i];
+            var row = table.insertRow();
+            Object.keys(child).forEach(function (k) {
+                var cell = row.insertCell();
+                cell.appendChild(document.createTextNode(child[k]));
+            })
+        }
+
+        // add the header last to prevent issues with the body going into the header when the body is empty
+        var header = array[0];
+        addHeaders(table, Object.keys(header));
+
+        return table;
     }
 
     async function makeItPretty() {
@@ -884,6 +907,25 @@
             .link {
                 margin:0;
                 padding:0;
+            }
+
+            table {
+                color: black;
+                margin-left: 26px;
+                border-collapse: collapse;
+                border: 1px solid black;
+                table-layout: fixed;
+                width: 98%;
+            }
+
+            thead td {
+                font-weight: bold;
+            }
+
+            td {
+                padding: 4px;
+                border: 1px solid;
+                overflow:auto;
             }
             `
 
