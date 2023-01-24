@@ -186,7 +186,7 @@ function handleCopy(element) {
     }
 
     function createLinkSpan(cls, value) {
-        return `<span class='${escapeHtml(cls)} hover'>${value}</span>`;
+        return `<span class='${escapeHtml(cls)}'>${value}</span>`;
     }
 
     function createFieldSpan(cls, value, fieldName) {
