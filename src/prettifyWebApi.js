@@ -701,8 +701,14 @@
             const originalValue = window.originalResponseCopy[key];
             const updatedValue = changedFields[key];
             previewText += key + ': \n';
-            previewText += 'old: "' + originalValue + '"\n';
-            if (updatedValue === null) { // literal null check. Remove double quotes for clear communication to the user that is an actuall null and not the string "null"
+
+            if (originalValue === null) { // literal null check. Remove double quotes for clear communication to the user that is an actuall null and not the string "null"
+                previewText += 'old: ' + originalValue + '\n';
+            } else {
+                previewText += 'old: "' + originalValue + '"\n';
+            }
+
+            if (updatedValue === null) { // again literal check. Same reason.
                 previewText += 'new: ' + updatedValue + '\n';
             } else {
                 previewText += 'new: "' + updatedValue + '"\n';
