@@ -565,7 +565,7 @@
             el.classList.remove('field');
 
             // set to fixed heigth for cleaner looking page
-            el => el.style.height = '20px';
+            el.style.height = '20px';
         });
 
     }
