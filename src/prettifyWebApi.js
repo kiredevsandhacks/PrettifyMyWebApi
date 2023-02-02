@@ -678,9 +678,33 @@
         };
 
         const bypassCustomPluginExecution = document.getElementsByClassName('bypassPluginExecutionBox')[0].checked;
-
         if (!!bypassCustomPluginExecution) {
             headers['MSCRM.BypassCustomPluginExecution'] = true;
+        }
+
+        const impersonateAnotherUser = document.getElementsByClassName('impersonateAnotherUserCheckbox')[0].checked;
+        const impersonateAnotherUserField = document.getElementsByClassName('impersonateAnotherUserSelect')[0].value;
+        const impersonateAnotherUserInput = document.getElementsByClassName('impersonateAnotherUserInput')[0].value;
+
+        if (!!impersonateAnotherUser) {
+            if (impersonateAnotherUserInput == null || impersonateAnotherUserInput == '') {
+                alert('User impersonation was checked, but ' + impersonateAnotherUserField + ' is empty');
+                return;
+            }
+
+            if (impersonateAnotherUserInput?.length != 36) {
+                alert('Error while impersonating user: ' + impersonateAnotherUserInput + ' is not a valid guid.');
+                return;
+            }
+
+            if (impersonateAnotherUserField == 'systemuserid') {
+                headers['MSCRMCallerID'] = impersonateAnotherUserInput;
+            } else if (impersonateAnotherUserField == 'azureactivedirectoryobjectid') {
+                headers['CallerObjectId'] = impersonateAnotherUserInput;
+            } else {
+                alert('This should not happen. Wrong value in impersonateAnotherUserSelect: ' + impersonateAnotherUserField);
+                return;
+            }
         }
 
         const response = await fetch(requestUrl, {
@@ -693,8 +717,8 @@
             await makeItPretty();
         } else {
             const errorText = await response.text();
-            console.error(errorText);
-            window.alert(errorText);
+            console.error(`${response.status} - ${errorText}`);
+            window.alert(`${response.status} - ${errorText}`);
         }
     }
 
@@ -734,14 +758,19 @@
 
         htmlElement.innerText = '';
         const pre = document.createElement('pre');
+
         if (generateEditLink) {
             pre.classList.add('mainPanel');
         }
+
         htmlElement.appendChild(pre).innerHTML = json;
         setPreviewLinkClickHandlers();
         setEditLinkClickHandlers();
         setCopyToClipboardHandlers();
-        setImpersonateUserHandlers();
+
+        if (!isMultiple && generateEditLink) {
+            setImpersonateUserHandlers();
+        }
     }
 
     function previewChanges(changedFields, pluralName, id) {
@@ -761,18 +790,7 @@
         const table = tableFromChanges(changes);
 
         // disable all stuff to prevent edits after previewing
-        const inputs = document.getElementsByTagName('input');
-        for (let i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = true;
-        }
-        const selects = document.getElementsByTagName('select');
-        for (let i = 0; i < selects.length; i++) {
-            selects[i].disabled = true;
-        }
-        const textareas = document.getElementsByTagName('textarea');
-        for (let i = 0; i < textareas.length; i++) {
-            textareas[i].disabled = true;
-        }
+        disableAllInputs();
 
         const editMenu = document.getElementById('previewChangesDiv');
         editMenu.innerHTML = '  ';
@@ -806,6 +824,21 @@
         submitChangesLink.onclick = saveCallback;
 
         editMenu.appendChild(submitChangesLink);
+    }
+
+    function disableAllInputs() {
+        const inputs = document.getElementsByTagName('input');
+        for (let i = 0; i < inputs.length; i++) {
+            inputs[i].disabled = true;
+        }
+        const selects = document.getElementsByTagName('select');
+        for (let i = 0; i < selects.length; i++) {
+            selects[i].disabled = true;
+        }
+        const textareas = document.getElementsByTagName('textarea');
+        for (let i = 0; i < textareas.length; i++) {
+            textareas[i].disabled = true;
+        }
     }
 
     async function previewRecord(pluralName, url) {
