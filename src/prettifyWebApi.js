@@ -654,38 +654,11 @@
             }
         }
 
-        const previewChangesBeforeSaving = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('previewChangesBeforeSavingBox')[0].checked;
-        const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
-
-        if (!!previewChangesBeforeSaving) {
-            previewChanges(changedFields, pluralName, id);
-            submitLink.style.display = 'none';
-            return;
-        }
-
-        await commitSave(pluralName, id, changedFields);
-    }
-
-    async function commitSave(pluralName, id, changedFields) {
-        const requestUrl = apiUrl + pluralName + '(' + id + ')';
-
-        const headers = {
-            'accept': 'application/json',
-            'content-type': 'application/json',
-            'OData-MaxVersion': '4.0',
-            'OData-Version': '4.0',
-            'If-Match': '*'
-        };
-
-        const bypassCustomPluginExecution = document.getElementsByClassName('bypassPluginExecutionBox')[0].checked;
-        if (!!bypassCustomPluginExecution) {
-            headers['MSCRM.BypassCustomPluginExecution'] = true;
-        }
-
         const impersonateAnotherUser = document.getElementsByClassName('impersonateAnotherUserCheckbox')[0].checked;
         const impersonateAnotherUserField = document.getElementsByClassName('impersonateAnotherUserSelect')[0].value;
         const impersonateAnotherUserInput = document.getElementsByClassName('impersonateAnotherUserInput')[0].value;
 
+        const impersonateHeader = {};
         if (!!impersonateAnotherUser) {
             if (impersonateAnotherUserInput == null || impersonateAnotherUserInput == '') {
                 alert('User impersonation was checked, but ' + impersonateAnotherUserField + ' is empty');
@@ -693,18 +666,48 @@
             }
 
             if (impersonateAnotherUserInput?.length != 36) {
-                alert('Error while impersonating user: ' + impersonateAnotherUserInput + ' is not a valid guid.');
+                alert('User impersonation input error: ' + impersonateAnotherUserInput + ' is not a valid guid.');
                 return;
             }
 
             if (impersonateAnotherUserField == 'systemuserid') {
-                headers['MSCRMCallerID'] = impersonateAnotherUserInput;
+                impersonateHeader['MSCRMCallerID'] = impersonateAnotherUserInput;
             } else if (impersonateAnotherUserField == 'azureactivedirectoryobjectid') {
-                headers['CallerObjectId'] = impersonateAnotherUserInput;
+                impersonateHeader['CallerObjectId'] = impersonateAnotherUserInput;
             } else {
                 alert('This should not happen. Wrong value in impersonateAnotherUserSelect: ' + impersonateAnotherUserField);
                 return;
             }
+        }
+
+        const previewChangesBeforeSaving = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('previewChangesBeforeSavingBox')[0].checked;
+        const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
+
+        if (!!previewChangesBeforeSaving) {
+            previewChanges(changedFields, pluralName, id, impersonateHeader);
+            submitLink.style.display = 'none';
+            return;
+        }
+
+        await commitSave(pluralName, id, changedFields, impersonateHeader);
+    }
+
+    async function commitSave(pluralName, id, changedFields, impersonateHeader) {
+        const requestUrl = apiUrl + pluralName + '(' + id + ')';
+
+        let headers = {
+            'accept': 'application/json',
+            'content-type': 'application/json',
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            'If-Match': '*'
+        };
+
+        headers = { ...headers, ...impersonateHeader }
+
+        const bypassCustomPluginExecution = document.getElementsByClassName('bypassPluginExecutionBox')[0].checked;
+        if (!!bypassCustomPluginExecution) {
+            headers['MSCRM.BypassCustomPluginExecution'] = true;
         }
 
         const response = await fetch(requestUrl, {
@@ -773,7 +776,7 @@
         }
     }
 
-    function previewChanges(changedFields, pluralName, id) {
+    function previewChanges(changedFields, pluralName, id, impersonateHeader) {
         const changes = [];
 
         for (let key in changedFields) {
@@ -818,7 +821,7 @@
 
         // create this callback so we enclose the values we need when saving
         const saveCallback = async function () {
-            await commitSave(pluralName, id, changedFields);
+            await commitSave(pluralName, id, changedFields, impersonateHeader);
         }
 
         submitChangesLink.onclick = saveCallback;
