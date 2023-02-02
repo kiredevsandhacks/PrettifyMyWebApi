@@ -183,7 +183,7 @@
     }
 
     function createSpan(cls, value) {
-        return `<span class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span class='${escapeHtml(cls)} field'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
     function createLinkSpan(cls, value) {
@@ -191,10 +191,10 @@
     }
 
     function createFieldSpan(cls, value, fieldName) {
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
-    function createOptionSetSpan(cls, value, fieldName, formattedValue) {
+    function createdFormattedValueSpan(cls, value, fieldName, formattedValue) {
         let insertedValue = '';
 
         // toString the value because it can be a number. The formattedValue is always a string
@@ -204,7 +204,7 @@
             insertedValue = value;
         }
 
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} hover'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
     async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested) {
@@ -275,7 +275,7 @@
                 delete ordered[key + navigationPropertyType];
                 delete ordered[key + lookupType];
             } else if (keyHasFormattedValueAnnotation(key, ordered)) {
-                ordered[key] = createOptionSetSpan(cls, value, key, ordered[key + formattedValueType]);
+                ordered[key] = createdFormattedValueSpan(cls, value, key, ordered[key + formattedValueType]);
                 delete ordered[key + formattedValueType];
             } else {
                 if (key === primaryIdAttribute) {
@@ -560,8 +560,14 @@
             await submitEdit(pluralName, id);
         }
 
-        // remove all hover handlers as they mess up the foratting and are not wanted in the editing context
-        Array.from(document.querySelectorAll('.hover')).forEach((el) => el.classList.remove('hover'));
+        document.querySelectorAll('.field').forEach((el) => {
+            // remove all hover handlers as they mess up the formatting and are not wanted in the editing context
+            el.classList.remove('field');
+
+            // set to fixed heigth for cleaner looking page
+            el => el.style.height = '20px';
+        });
+
     }
 
     async function submitEdit(pluralName, id) {
@@ -967,9 +973,14 @@
             .link { color: blue; }
             .primarykey { color: tomato; }
 
-            input, textarea {
-              width: 300px;
-              margin: 0 0 0 8px;
+            input {
+                width: 300px;
+                margin: 0 0 0 8px;
+            }
+
+            textarea {
+                width: 400px;
+                margin: 0 0 0 20px;
             }
 
             select {
@@ -982,19 +993,19 @@
             }
 
             option:empty {
-              display:none;
+                display:none;
             }
 
             .copyButton {
-              color:dimgray;
-              display: none;
+                color:dimgray;
+                display: none;
             }           
             
-            .hover:hover .copyButton {
-              display: unset;
+            .field:hover .copyButton {
+                display: unset;
             }
 
-            .copyButton:hover {
+            .copyButton:field {
                 color: black;
                 cursor: pointer;
             }
