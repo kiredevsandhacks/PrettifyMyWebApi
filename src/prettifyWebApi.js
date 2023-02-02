@@ -169,7 +169,17 @@
         const pluralName = await retrievePluralName(logicalName);
         const formattedGuid = guid.replace('{', '').replace('}', '');
 
-        return `<a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='#'>Edit this record</a>     <div class='editMenuDiv' style='display: none;'><div>    Bypass Custom Plugin Execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'></div><div>    Preview changes before committing save<input class='previewChangesBeforeSavingBox' type='checkbox' style='width:25px;' checked='true'></div><div><div id='previewChangesDiv'></div>    <a class='submitLink' style='display: none;' href='#'>Save</a></div></div>  `;
+        return `
+<a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='#'>Edit this record</a>     
+<div class='editMenuDiv' style='display: none;'>
+    <div>    Bypass Custom Plugin Execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'>
+    </div><div>    Preview changes before committing save<input class='previewChangesBeforeSavingBox' type='checkbox' style='width:25px;' checked='true'>
+    </div><div>    Impersonate another user<input class='impersonateAnotherUserCheckbox' type='checkbox' style='width:25px;'>
+    </div><div class='impersonateDiv' style='display:none;'><div>      Base impersonation on this field: <select  class='impersonateAnotherUserSelect'><option value='systemuserid'>systemuserid</option><option value='azureactivedirectoryobjectid'>azureactivedirectoryobjectid</option></select>  <i><a href='https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user' target='_blank'>What's this?</a></i>
+    </div><div>      <span class='impersonationIdFieldLabel'>systemuserid:</span><input class='impersonateAnotherUserInput'>  <span class='impersonateUserPreview'></span>
+    </div></div><div><div id='previewChangesDiv'></div>    <a class='submitLink' style='display: none;' href='#'>Save</a>
+    </div>
+</div>`.replaceAll('\n', '');
     }
 
     function createSpan(cls, value) {
@@ -352,6 +362,49 @@
 
             editLink.onclick = async function () {
                 await editRecord(logicalName, pluralName, id);
+            }
+        }
+    }
+
+    function setImpersonateUserHandlers() {
+        const impersonateAnotherUserCheckbox = document.getElementsByClassName('impersonateAnotherUserCheckbox')[0];
+        const impersonateAnotherUserSelect = document.getElementsByClassName('impersonateAnotherUserSelect')[0];
+        const impersonationIdFieldLabel = document.getElementsByClassName('impersonationIdFieldLabel')[0];
+        const impersonateDiv = document.getElementsByClassName('impersonateDiv')[0];
+        const impersonateAnotherUserInput = document.getElementsByClassName('impersonateAnotherUserInput')[0];
+        const impersonateUserPreview = document.getElementsByClassName('impersonateUserPreview')[0];
+
+        impersonateAnotherUserSelect.onchange = async () => {
+            impersonationIdFieldLabel.innerText = impersonateAnotherUserSelect.value + ':';
+            await handleUserPreview();
+        }
+
+        impersonateAnotherUserCheckbox.onclick = () => {
+            if (!!impersonateAnotherUserCheckbox.checked) {
+                impersonateDiv.style.display = 'inline';
+            } else {
+                impersonateDiv.style.display = 'none'
+            }
+        }
+
+        impersonateAnotherUserInput.oninput = async () => {
+            await handleUserPreview();
+        };
+
+        async function handleUserPreview() {
+            if (!impersonateAnotherUserInput.value) {
+                impersonateUserPreview.innerText = '';
+                return;
+            }
+            const retrievedSystemUser = await odataFetch(apiUrl + `systemusers?$filter=${impersonateAnotherUserSelect.value} eq '${impersonateAnotherUserInput.value}'&$select=fullname`);
+            if (retrievedSystemUser.error) {
+                impersonateUserPreview.innerText = retrievedSystemUser.error.message;
+            } else if (retrievedSystemUser.value.length == 0) {
+                impersonateUserPreview.innerText = 'user not found';
+            } else if (retrievedSystemUser.value.length == 1) {
+                impersonateUserPreview.innerText = retrievedSystemUser.value[0].fullname;
+            } else {
+                impersonateUserPreview.innerText = 'Something went wrong with retrieving the systemuser.';
             }
         }
     }
@@ -688,6 +741,7 @@
         setPreviewLinkClickHandlers();
         setEditLinkClickHandlers();
         setCopyToClipboardHandlers();
+        setImpersonateUserHandlers();
     }
 
     function previewChanges(changedFields, pluralName, id) {
@@ -931,6 +985,11 @@
                 padding: 4px;
                 border: 1px solid;
                 overflow:auto;
+            }
+
+            .impersonationIdFieldLabel {
+                padding:0px;
+                margin:0px;
             }
             `
 
