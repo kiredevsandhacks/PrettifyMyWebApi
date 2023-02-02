@@ -517,10 +517,14 @@
                             const fieldOptionset = fieldOptionSetMetadata.GlobalOptionSet || fieldOptionSetMetadata.OptionSet;
                             createOptionSetValueInput(container, fieldOptionset.Options)
                         }
-                    } else if (attributeType === 'Integer' || attributeType === 'Double') { // for now treat double the same as ints and let the server handle the validation
+                    } else if (attributeType === 'Integer') {
                         createInput(container, false, 'int');
                     } else if (attributeType === 'Decimal') {
                         createInput(container, false, 'decimal');
+                    } else if (attributeType === 'Money') {
+                        createInput(container, false, 'money');
+                    } else if (attributeType === 'Double') {
+                        createInput(container, false, 'float');
                     } else if (attributeType === 'Boolean') {
                         const fieldOptionSetMetadata = booleanMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
                         if (fieldOptionSetMetadata) {
@@ -602,23 +606,23 @@
                         return;
                     }
                 }
-            } else if (dataType === 'decimal') {
+            } else if (dataType === 'decimal' || dataType == 'money' || dataType == 'float') {
                 if (inputValue == null || inputValue === undefined || inputValue === '') {
                     value = null;
                 } else {
                     if (inputValue.includes(',')) {
-                        alert(fieldName + ' is a decimal number and contains a comma (,). Use a dot (.) as the separator.');
+                        alert(`${fieldName} is a column of type '${dataType}' and contains a comma (,). Use a dot (.) as the separator.`);
                         return;
                     }
 
                     value = parseFloat(inputValue);
                     if (isNaN(value)) {
-                        alert(fieldName + ' is a decimal number. The value ' + inputValue + ' is not compatible.');
+                        alert(`${fieldName} is a column of type '${dataType}'. The value ${inputValue} is not compatible.`);
                         return;
                     }
 
                     if (/^-?[0-9]\d*(\.\d+)?$/.test(inputValue) === false) {
-                        alert(fieldName + ' is a decimal number. The value ' + inputValue + ' is not compatible.');
+                        alert(`${fieldName} is a column of type '${dataType}'. The value ${inputValue} is not compatible.`);
                         return;
                     }
                 }
