@@ -18,7 +18,11 @@
         alert('It seems you are not viewing a form or the dataverse odata web api. If you think this is an error, please contact the author of the extension and he will fix it asap.');
         return;
     }
-    const retrievedPluralNames = {};
+
+    const retrievedPrimaryNamesAndKeys = {};
+    const lazyLookupInitFunctions = {};
+    const retrievedSearchableAttributes = {};
+    let allPluralNames = null;
 
     async function odataFetch(url) {
         const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
@@ -27,18 +31,45 @@
     }
 
     async function retrievePluralName(logicalName) {
-        if (retrievedPluralNames.hasOwnProperty(logicalName)) {
-            return retrievedPluralNames[logicalName];
+        const pluralNames = await retrieveAllPluralNames();
+
+        const table = pluralNames.find(p => p.LogicalName === logicalName);
+
+        return table.EntitySetName;
+    }
+
+    async function retrieveAllPluralNames() {
+        if (allPluralNames != null) {
+            return allPluralNames;
         }
 
-        const requestUrl = apiUrl + "EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq '" + logicalName + "')";
+        const requestUrl = apiUrl + "EntityDefinitions?$select=EntitySetName,LogicalName";
 
         const json = await odataFetch(requestUrl);
 
-        const pluralName = json.value[0].EntitySetName;
-        retrievedPluralNames[logicalName] = pluralName;
+        allPluralNames = json.value;
 
-        return pluralName;
+        return allPluralNames;
+    }
+
+    // TODO: if lookup query is implemented, maybe refactor this into the retrieveAllPluralNames function? Let it just retrieve all needed metadata from the system in one api call
+    async function retrievePrimaryNameAndKeyAndPluralName(logicalName) {
+        if (retrievedPrimaryNamesAndKeys.hasOwnProperty(logicalName)) {
+            return retrievedPrimaryNamesAndKeys[logicalName];
+        }
+
+        const requestUrl = apiUrl + "EntityDefinitions?$select=PrimaryNameAttribute,PrimaryIdAttribute,EntitySetName&$filter=(LogicalName eq '" + logicalName + "')";
+
+        const json = await odataFetch(requestUrl);
+
+        let primaryNameAndKey = {};
+        primaryNameAndKey.name = json.value[0].PrimaryNameAttribute;
+        primaryNameAndKey.key = json.value[0].PrimaryIdAttribute;
+        primaryNameAndKey.plural = json.value[0].EntitySetName;
+
+        retrievedPrimaryNamesAndKeys[logicalName] = primaryNameAndKey;
+
+        return primaryNameAndKey;
     }
 
     async function retrieveLogicalNameFromPluralNameAsync(pluralName) {
@@ -59,6 +90,20 @@
         };
     }
 
+    async function retrieveSearchableAttributes(logicalName) {
+        if (retrievedSearchableAttributes.hasOwnProperty(logicalName)) {
+            return retrievedSearchableAttributes[logicalName];
+        }
+
+        const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForAdvancedFind/Value eq true";
+
+        const json = await odataFetch(requestUrl);
+
+        retrievedSearchableAttributes[logicalName] = json.value;
+
+        return json.value;
+    }
+
     async function retrieveUpdateableAttributes(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForUpdate eq true";
 
@@ -67,7 +112,7 @@
         return json.value;
     }
 
-    async function retrieveOptionSetMetadata(logicalName, fieldName) {
+    async function retrieveOptionSetMetadata(logicalName, fieldname) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
         const json = await odataFetch(requestUrl);
@@ -75,8 +120,18 @@
         return json.value;
     }
 
-    async function retrieveBooleanFieldMetadata(logicalName, fieldName) {
+    async function retrieveBooleanFieldMetadata(logicalName, fieldname) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
+
+        const json = await odataFetch(requestUrl);
+
+        return json.value;
+    }
+
+
+    async function doLookupInputQuery(pluralName, fieldToFilterOn, fieldToDisplay, primaryKeyfieldname, query) {
+        query = query.replaceAll(`'`, `''`);
+        const requestUrl = apiUrl + `${pluralName}?$top=10&$select=${fieldToDisplay},${primaryKeyfieldname}&$filter=contains(${fieldToFilterOn}, '${query}')`;
 
         const json = await odataFetch(requestUrl);
 
@@ -162,7 +217,7 @@
         const pluralName = await retrievePluralName(logicalName);
         const formattedGuid = guid.replace('{', '').replace('}', '');
 
-        return `<a class='previewLink' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='#'>Preview</a>`;
+        return `<a class='previewLink' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Preview</a>`;
     }
 
     async function generateEditAnchor(logicalName, guid) {
@@ -170,28 +225,44 @@
         const formattedGuid = guid.replace('{', '').replace('}', '');
 
         return `
-<a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='#'>Edit this record</a>     
+<a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Edit this record</a>     
 <div class='editMenuDiv' style='display: none;'>
     <div>    Bypass Custom Plugin Execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'>
     </div><div>    Preview changes before committing save<input class='previewChangesBeforeSavingBox' type='checkbox' style='width:25px;' checked='true'>
     </div><div>    Impersonate another user<input class='impersonateAnotherUserCheckbox' type='checkbox' style='width:25px;'>
     </div><div class='impersonateDiv' style='display:none;'><div>      Base impersonation on this field: <select  class='impersonateAnotherUserSelect'><option value='systemuserid'>systemuserid</option><option value='azureactivedirectoryobjectid'>azureactivedirectoryobjectid</option></select>  <i><a href='https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user' target='_blank'>What's this?</a></i>
-    </div><div>      <span class='impersonationIdFieldLabel'>systemuserid:</span><input class='impersonateAnotherUserInput'>  <span class='impersonateUserPreview'></span>
-    </div></div><div><div id='previewChangesDiv'></div>    <a class='submitLink' style='display: none;' href='#'>Save</a>
+    </div><div>      <span class='impersonationIdFieldLabel'>systemuserid:</span><input class='impersonateAnotherUserInput' placeholder='00000000-0000-0000-0000-000000000000'>  <span class='impersonateUserPreview'></span>
+    </div></div><div><div id='previewChangesDiv'></div>    <a class='submitLink' style='display: none;' href='javascript:'>Save</a>
     </div>
 </div>`.replaceAll('\n', '');
     }
 
     function createSpan(cls, value) {
-        return `<span class='${escapeHtml(cls)} field'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+    }
+
+    function createSpanForLookup(cls, value) {
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field lookupField'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
     function createLinkSpan(cls, value) {
+        // unsafe contents of 'value' have been escaped in a previous stage
         return `<span class='${escapeHtml(cls)}'>${value}</span>`;
     }
 
     function createFieldSpan(cls, value, fieldName) {
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+    }
+
+    function createLookupEditField(displayName, guid, fieldname, lookupTypeValue, navigationPropertyValue) {
+        if (displayName === null) { // must be literal null check, because the lookup annotation can sometimes be undefined, for example on owninguser field
+            displayName = '';
+        }
+
+        fieldname = fieldname.substring(1, fieldname.length - 1).substring(0, fieldname.length - 7);
+
+        const formattedGuid = guid?.replace('{', '')?.replace('}', '');
+        return `<div class='lookupEditLinks' style='display:none;' data-fieldname='${escapeHtml(fieldname)}'><span class='link'>   <a href='javascript:' class='searchDifferentRecord lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Search for different record</a></span><span class='link'>   <a href='javascript:' class='clearLookup lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Clear lookup (set to null)</a></span><span class='link'>   <a href='javascript:' class='cancelLookupEdit lookupEditLink' data-fieldname='${escapeHtml(fieldname)}' style='display:none;'>Undo changes</a></span></div><span class='lookupEdit' style='display: none;'><div class='inputContainer containerNotEnabled' data-name='${escapeHtml(displayName)}' data-id='${escapeHtml(formattedGuid)}' data-fieldname='${escapeHtml(fieldname)}' data-lookuptype='${escapeHtml(lookupTypeValue)}' data-navigationproperty='${escapeHtml(navigationPropertyValue)}'></div></span>`;
     }
 
     function createdFormattedValueSpan(cls, value, fieldName, formattedValue) {
@@ -204,7 +275,7 @@
             insertedValue = value;
         }
 
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldName='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
     async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested) {
@@ -249,6 +320,7 @@
             }
 
             if (value != null && value.replaceAll) {
+                value = value.replaceAll(replacedQuote, ''); // to prevent malformed html and potential xss, disallow this string
                 value = value.replaceAll('"', replacedQuote);
                 value = value.replaceAll(',', replacedComma);
             }
@@ -262,19 +334,36 @@
                 const formUrl = generateFormUrlAnchor(lookupTypeValue, value);
                 const previewUrl = await generatePreviewUrlAnchor(lookupTypeValue, value);
 
-                ordered[key] = [
+                let lookupFormatted = '';
+
+                lookupFormatted += `<span class='lookupDisplay'>{<br>      ` +
                     createLinkSpan('link', newApiUrl) + ' : ' +
                     createLinkSpan('link', formUrl) + ' : ' +
-                    createLinkSpan('link', previewUrl),
-                    createSpan(determineType(formattedValueValue), 'Name: ' + formattedValueValue),
-                    createSpan(determineType(lookupTypeValue), 'LogicalName: ' + lookupTypeValue),
-                    createSpan(determineType(navigationPropertyValue), 'NavigationProperty: ' + navigationPropertyValue)
-                ];
+                    createLinkSpan('link', previewUrl);
+                lookupFormatted += '<br>      '
+                lookupFormatted += createSpan(determineType(formattedValueValue), 'Name: ' + formattedValueValue);
+                lookupFormatted += '<br>      '
+                lookupFormatted += createSpan(determineType(lookupTypeValue), 'LogicalName: ' + lookupTypeValue);
+                lookupFormatted += '<br>      '
+                lookupFormatted += createSpan(determineType(navigationPropertyValue), 'NavigationProperty: ' + navigationPropertyValue);
+                lookupFormatted += '<br>'
+                lookupFormatted += '   }';
+                lookupFormatted += '</span>';
+                lookupFormatted += `<span class='lookupEdit' style='display:none;' >`;
+                lookupFormatted += createSpanForLookup('string', formattedValueValue);
+                lookupFormatted += '</span>';
+                lookupFormatted += createLookupEditField(formattedValueValue, value, key, lookupTypeValue, navigationPropertyValue);
+                ordered[key] = lookupFormatted;
 
                 delete ordered[key + formattedValueType];
                 delete ordered[key + navigationPropertyType];
                 delete ordered[key + lookupType];
-            } else if (keyHasFormattedValueAnnotation(key, ordered)) {
+            }
+            else if (key.startsWith('_') && key.endsWith('_value')) {
+                // we have a null lookup here
+                ordered[key] = createSpanForLookup('null', value) + createLookupEditField(null, null, key, null, null);
+            }
+            else if (keyHasFormattedValueAnnotation(key, ordered)) {
                 ordered[key] = createdFormattedValueSpan(cls, value, key, ordered[key + formattedValueType]);
                 delete ordered[key + formattedValueType];
             } else {
@@ -355,6 +444,7 @@
     function setEditLinkClickHandlers() {
         const editLinks = document.getElementsByClassName('editLink');
 
+        // TODO refactor .attributes to .dataset
         for (let editLink of editLinks) {
             const logicalName = editLink.attributes['data-logicalName'].value;
             const pluralName = editLink.attributes['data-pluralName'].value;
@@ -409,6 +499,81 @@
         }
     }
 
+    function setLookupEditHandlers() {
+        const clearLookupLinks = document.getElementsByClassName('clearLookup');
+
+        for (let link of clearLookupLinks) {
+            const logicalName = link.dataset.fieldname;
+            link.onclick = () => {
+                const enabledInputFields = document.getElementsByClassName('enabledInputField');
+                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === logicalName);
+                lookup.value = null;
+                lookup.dataset.id = null;
+                lookup.dataset.editmode = 'makenull';
+
+                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === logicalName);
+                makeNullDiv.style.display = 'block';
+
+                const lookupEditMenuDivs = document.getElementsByClassName('lookupEditMenuDiv');
+                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === logicalName);
+
+                lookupEditMenuDiv.style.display = 'none';
+
+                const cancelLookupEditDivs = document.getElementsByClassName('cancelLookupEdit');
+                const cancelLookupEditDiv = [...cancelLookupEditDivs].find(f => f.dataset.fieldname === logicalName);
+                cancelLookupEditDiv.style.display = 'unset';
+            };
+        }
+
+        const searchDifferentRecordLinks = document.getElementsByClassName('searchDifferentRecord');
+
+        for (let link of searchDifferentRecordLinks) {
+            const logicalName = link.dataset.fieldname;
+            link.onclick = async () => {
+                const enabledInputFields = document.getElementsByClassName('enabledInputField');
+                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === logicalName);
+                lookup.dataset.editmode = 'update';
+
+                const lookupEditMenuDivs = document.getElementsByClassName('lookupEditMenuDiv');
+                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === logicalName);
+
+                lookupEditMenuDiv.style.display = 'unset';
+
+                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === logicalName);
+                makeNullDiv.style.display = 'none';
+
+                const cancelLookupEditDivs = document.getElementsByClassName('cancelLookupEdit');
+                const cancelLookupEditDiv = [...cancelLookupEditDivs].find(f => f.dataset.fieldname === logicalName);
+                cancelLookupEditDiv.style.display = 'unset';
+
+                await lazyLookupInitFunctions[logicalName]?.call();
+            };
+        }
+
+        const cancelLookupEditLinks = document.getElementsByClassName('cancelLookupEdit');
+
+        for (let link of cancelLookupEditLinks) {
+            const logicalName = link.dataset.fieldname;
+            link.onclick = () => {
+                const enabledInputFields = document.getElementsByClassName('enabledInputField');
+                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === logicalName);
+                lookup.value = lookup.dataset.originalname;
+                lookup.dataset.id = lookup.dataset.originalid;
+                lookup.dataset.editmode = null;
+
+                link.style.display = 'none';
+
+                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === logicalName);
+                makeNullDiv.style.display = 'none';
+
+                const lookupEditMenuDivs = document.getElementsByClassName('lookupEditMenuDiv');
+                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === logicalName);
+
+                lookupEditMenuDiv.style.display = 'none';
+            };
+        }
+    }
+
     function createInput(container, multiLine, datatype) {
         const value = window.originalResponseCopy[container.dataset.fieldname];
 
@@ -439,6 +604,7 @@
             if (value === option.Value) {
                 cachedValue = formattedOption;
             }
+            // TODO: refactor the value attribute to contain the pure values, true/false/null
             selectHtml += `<option value='${escapeHtml(formattedOption)}'>${escapeHtml(formattedOption)}</option>`;
         });
 
@@ -460,6 +626,7 @@
 
         const falseFormatted = 'false : ' + falseOption.Label.UserLocalizedLabel.Label;
         const trueFormatted = 'true : ' + trueOption.Label.UserLocalizedLabel.Label;
+        // TODO: refactor the value attribute to contain the pure values, true/false/null
         selectHtml += `<option value='${escapeHtml(falseFormatted)}'>${escapeHtml(falseFormatted)}</option>`;
         selectHtml += `<option value='${escapeHtml(trueFormatted)}'>${escapeHtml(trueFormatted)}</option>`;
         select.innerHTML = selectHtml;
@@ -475,10 +642,241 @@
         setInputMetadata(select, container, 'bool');
     }
 
+    function createLookupInput(container, targets) {
+        let id = container.dataset.id;
+        if (id == 'undefined' || id == undefined || id == null) {
+            id = 'null';
+        }
+
+        const fieldName = container.dataset.fieldname;
+        const name = container.dataset.name;
+        const lookupType = container.dataset.lookuptype;
+        const navigationProperty = container.dataset.navigationproperty;
+
+        const input = document.createElement('input');
+        input.placeholder = '00000000-0000-0000-0000-000000000000';
+
+        input.dataset.id = id;
+        input.dataset.originalid = id;
+        input.dataset.logicalname = lookupType;
+        input.dataset.originallogicalname = lookupType;
+
+        const selectTable = document.createElement('select');
+        selectTable.style.height = '22px';
+        selectTable.classList.add('lookupSelectTable');
+        selectTable.dataset.fieldname = fieldName;
+
+        for (let target of targets) {
+            let option = document.createElement('option');
+            option.value = target;
+            option.innerText = target;
+            selectTable.appendChild(option);
+        }
+
+        input.dataset.ismultipletarget = false;
+        if (targets.length < 2) {
+            selectTable.setAttribute('disabled', 'disabled');
+            input.dataset.ismultipletarget = 'false';
+        } else {
+            input.dataset.ismultipletarget = 'true';
+        }
+
+        const editMenuDiv = document.createElement('div');
+        editMenuDiv.dataset.fieldname = fieldName;
+        editMenuDiv.style.display = 'none';
+        editMenuDiv.classList.add('lookupEditMenuDiv');
+
+        const selectTableDiv = document.createElement('div');
+        selectTableDiv.append('      table: ');
+        selectTableDiv.append(selectTable);
+
+        editMenuDiv.append(selectTableDiv);
+
+        const makeNullDiv = document.createElement('div');
+        makeNullDiv.dataset.fieldname = fieldName;
+        makeNullDiv.style.display = 'none';
+        makeNullDiv.classList.add('makeLookupNullDiv');
+
+        makeNullDiv.innerHTML = '      <b>Lookup will be cleared (will be set to null)</b>'
+
+        container.parentElement.appendChild(makeNullDiv);
+
+        const lookupEditLinks = document.getElementsByClassName('lookupEditLinks');
+        const lookupEditLinkDiv = [...lookupEditLinks].find(l => l.dataset.fieldname === fieldName);
+        lookupEditLinkDiv.style.display = 'unset';
+
+        setInputMetadataForLookup(input, container, editMenuDiv);
+
+        let targetToCache = lookupType;
+        if (targetToCache === 'null' || targetToCache == null || targetToCache == undefined) {
+            targetToCache = targets[0];
+        }
+
+        selectTable.value = targetToCache;
+
+        initLookupMetadata(targetToCache, input);
+
+        selectTable.onchange = async () => await handleTableSelect(selectTable, input);
+
+        return;
+        // there is logic here for querying records. 
+        // Not enabled for now as it's complicated and very hard to give a great user experience
+
+        // placeholder after scrapping the lookup function. Needs to be placed somewhere
+        const queryInput = document.createElement('input');
+
+        const queryDiv = document.createElement('div');
+        queryDiv.append('      query: ');
+        queryDiv.append(queryInput);
+        editMenuDiv.append(queryDiv);
+
+        const selectFilterField = document.createElement('select');
+        selectFilterField.dataset.fieldname = fieldName;
+        selectFilterField.style.height = '22px';
+
+        const resultsSelect = document.createElement('select');
+        const resultsDiv = document.createElement('div');
+        resultsDiv.append('      query results:');
+        resultsDiv.append(resultsSelect);
+
+        resultsSelect.dataset.id = id;
+        resultsSelect.dataset.originalid = id;
+        resultsSelect.dataset.originalname = name;
+        resultsSelect.dataset.originalNavigationProperty = navigationProperty;
+        resultsSelect.dataset.originalLookupType = lookupType;
+
+        const selectFilterFieldDefault = document.createElement('option');
+        selectFilterFieldDefault.value = '_primary';
+        selectFilterFieldDefault.innerText = 'primary column';
+        selectFilterField.appendChild(selectFilterFieldDefault);
+
+        editMenuDiv.append(resultsDiv);
+
+        const selectFilterFieldDiv = document.createElement('div');
+        selectFilterFieldDiv.append('      field to query: ');
+        selectFilterFieldDiv.append(selectFilterField);
+        editMenuDiv.append(selectFilterFieldDiv);
+
+        lazyLookupInitFunctions[fieldName] = async () => initLookupMetadata(targetToCache);
+
+        setLookupInputQueryHandlers(queryInput, selectTable, selectFilterField, resultsSelect);
+    }
+
+    async function handleTableSelect(selectTable, input) {
+        const logicalName = selectTable.value;
+        const pluralName = await retrievePluralName(logicalName);
+        input.dataset.pluralname = pluralName;
+        input.dataset.logicalname = logicalName;
+
+    }
+
+    async function handleTableSelectv2(selectTable, selectFilterField) {
+        const logicalName = selectTable.value;
+        // retrieve the name etc. in advance because we will need it anyway
+        const { name, key, plural } = await retrievePrimaryNameAndKeyAndPluralName(logicalName);
+        const attributes = await retrieveSearchableAttributes(logicalName);
+
+        selectFilterField.innerHTML = ''; // reset
+
+        const selectFilterFieldDefault = document.createElement('option');
+        selectFilterFieldDefault.value = '_primary';
+        selectFilterFieldDefault.innerText = 'primary column (' + name + ')';
+        selectFilterField.appendChild(selectFilterFieldDefault);
+
+        const compare = (a, b) => {
+            if (a.LogicalName < b.LogicalName) {
+                return -1;
+            }
+            if (a.LogicalName > b.LogicalName) {
+                return 1;
+            }
+            return 0;
+        }
+
+        const ordered = attributes.sort(compare);
+
+        for (let attribute of ordered) {
+            let selectFilterFieldOption = document.createElement('option');
+            selectFilterFieldOption.value = attribute.LogicalName;
+            selectFilterFieldOption.innerText = attribute.LogicalName;
+            selectFilterField.appendChild(selectFilterFieldOption);
+        }
+    }
+
+    async function initLookupMetadata(logicalName, input) {
+        const pluralName = await retrievePluralName(logicalName);
+        input.dataset.originalpluralname = pluralName;
+        input.dataset.pluralname = pluralName;
+
+        // these lines are turned off while lookup query is not enabled
+        // await retrieveSearchableAttributes(logicalName);
+        // await retrievePrimaryNameAndKeyAndPluralName(logicalName);
+    }
+
+    async function setLookupInputQueryHandlers(input, selectTable, selectFilterField, resultsSelect) {
+        input.oninput = async () => {
+            if (selectTable.value == null) {
+                alert('Table to query is null. Cannot continue.')
+                return;
+            }
+            if (selectFilterField.value == null) {
+                alert('Field to query is null. Cannot continue.')
+                return;
+            }
+
+            if (input.value == null || input.value == '') {
+                resultsSelect.innerHTML = ''; // wipe it and stop
+                return;
+            }
+
+            // the values retrieved by retrievePrimaryNameAndKeyAndPluralName are cached and the api call will already have been done at this point
+            // unless the user selected a different table, in that case the api call will be done one time for the new table if not already cached
+            const primaryNameAndKeyAndPlural = await retrievePrimaryNameAndKeyAndPluralName(selectTable.value);
+
+            const primaryfieldname = primaryNameAndKeyAndPlural.name;
+            const primaryKeyName = primaryNameAndKeyAndPlural.key;
+            const pluralName = primaryNameAndKeyAndPlural.plural;
+
+            let fieldToQuery = selectFilterField.value;
+
+            if (fieldToQuery === '_primary') {
+                fieldToQuery = primaryfieldname;
+            }
+
+            const results = await doLookupInputQuery(pluralName, fieldToQuery, primaryfieldname, primaryKeyName, input.value);
+
+            resultsSelect.innerHTML = "<option value='null'></option>"; // empty option so that we don't select by default
+
+            for (let result of results) {
+                let option = document.createElement('option');
+                option.value = `/${pluralName}/(${result[primaryKeyName]})`;
+                option.innerText = result[primaryfieldname];
+                resultsSelect.appendChild(option);
+            }
+        };
+    }
+
+    function setInputMetadataForLookup(input, container, editMenuDiv) {
+        input.classList.add('enabledInputField');
+        input.dataset.fieldname = container.dataset.fieldname;
+        input.dataset.datatype = 'lookup';
+
+        editMenuDiv.append('      record id:');
+        editMenuDiv.appendChild(input);
+
+        container.parentElement.append(editMenuDiv);
+
+        container.style.display = null;
+        container.classList.remove('containerNotEnabled');
+        container.classList.add('containerEnabled');
+
+        container.style.display = 'none';
+    }
+
     function setInputMetadata(input, container, datatype) {
         input.classList.add('enabledInputField');
-        input.dataset['fieldname'] = container.dataset.fieldname;
-        input.dataset['datatype'] = datatype;
+        input.dataset.fieldname = container.dataset.fieldname;
+        input.dataset.datatype = datatype;
 
         container.parentElement.append(input);
 
@@ -501,46 +899,53 @@
         const booleanMetadata = await retrieveBooleanFieldMetadata(logicalName);
 
         const inputContainers = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('inputContainer');
+        const inputContainersArray = [...inputContainers];
 
         for (let attribute of attributesMetadata) {
-            for (let container of inputContainers) {
-                if (container.dataset.fieldname === attribute.LogicalName) {
-                    const attributeType = attribute.AttributeType;
-                    if (attributeType === 'String') {
-                        createInput(container, false, 'string');
-                    } else if (attributeType === 'Memo') {
-                        createInput(container, true, 'memo');
-                    } else if (attributeType === 'Picklist') {
-                        const fieldOptionSetMetadata = optionSetMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
+            let container = inputContainersArray.find(c => c.dataset.fieldname === attribute.LogicalName);
 
-                        if (fieldOptionSetMetadata) {
-                            const fieldOptionset = fieldOptionSetMetadata.GlobalOptionSet || fieldOptionSetMetadata.OptionSet;
-                            createOptionSetValueInput(container, fieldOptionset.Options)
-                        }
-                    } else if (attributeType === 'Integer') {
-                        createInput(container, false, 'int');
-                    } else if (attributeType === 'Decimal') {
-                        createInput(container, false, 'decimal');
-                    } else if (attributeType === 'Money') {
-                        createInput(container, false, 'money');
-                    } else if (attributeType === 'Double') {
-                        createInput(container, false, 'float');
-                    } else if (attributeType === 'Boolean') {
-                        const fieldOptionSetMetadata = booleanMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
-                        if (fieldOptionSetMetadata) {
-                            const fieldOptionset = fieldOptionSetMetadata.GlobalOptionSet || fieldOptionSetMetadata.OptionSet;
-                            createBooleanInput(container, fieldOptionset.FalseOption, fieldOptionset.TrueOption)
-                        }
-                    } else if (attributeType === 'DateTime') {
-                        // todo
-                    } else if (attributeType === 'Uniqueidentifier') {
-                        // can't change this
-                    } else if (attributeType === 'State') {
-                        // difficult to implement
-                    } else if (attributeType === 'Status') {
-                        // difficult to implement
-                    }
+            if (container == null) {
+                continue;
+            }
+
+            const attributeType = attribute.AttributeType;
+            if (attributeType === 'String') {
+                createInput(container, false, 'string');
+            } else if (attributeType === 'Memo') {
+                createInput(container, true, 'memo');
+            } else if (attributeType === 'Picklist') {
+                const fieldOptionSetMetadata = optionSetMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
+                if (fieldOptionSetMetadata) {
+                    const fieldOptionset = fieldOptionSetMetadata.GlobalOptionSet || fieldOptionSetMetadata.OptionSet;
+                    createOptionSetValueInput(container, fieldOptionset.Options)
                 }
+            } else if (attributeType === 'Integer') {
+                createInput(container, false, 'int');
+            } else if (attributeType === 'Decimal') {
+                createInput(container, false, 'decimal');
+            } else if (attributeType === 'Money') {
+                createInput(container, false, 'money');
+            } else if (attributeType === 'Double') {
+                createInput(container, false, 'float');
+            } else if (attributeType === 'Boolean') {
+                const fieldOptionSetMetadata = booleanMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
+                if (fieldOptionSetMetadata) {
+                    const fieldOptionset = fieldOptionSetMetadata.GlobalOptionSet || fieldOptionSetMetadata.OptionSet;
+                    createBooleanInput(container, fieldOptionset.FalseOption, fieldOptionset.TrueOption)
+                }
+            } else if (attributeType === 'Lookup') {
+                const targets = attribute.Targets;
+                createLookupInput(container, targets);
+            } else if (attributeType === 'DateTime') {
+                // todo
+            } else if (attributeType === 'Uniqueidentifier') {
+                // can't change this
+            } else if (attributeType === 'State') {
+                // difficult to implement
+            } else if (attributeType === 'Status') {
+                // difficult to implement
+            } else if (attributeType === 'Virtual') {
+                // difficult to implement
             }
         }
 
@@ -566,15 +971,28 @@
 
             // set to fixed heigth for cleaner looking page
             el.style.height = '20px';
+
+            if (el.classList.contains('lookupField')) {
+                el.style.margin = '1px 0 -2px 0';
+            }
         });
 
+        document.querySelectorAll('.lookupEdit').forEach((el) => {
+            el.style.display = 'unset';
+        });
+
+        document.querySelectorAll('.lookupDisplay').forEach((el) => {
+            el.style.display = 'none';
+        });
     }
 
     async function submitEdit(pluralName, id) {
+        const previewChangesBeforeSaving = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('previewChangesBeforeSavingBox')[0].checked;
+
         const changedFields = {};
         const enabledFields = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('enabledInputField');
         for (let input of enabledFields) {
-            const originalValue = window.originalResponseCopy[input.dataset.fieldname];
+            let originalValue = window.originalResponseCopy[input.dataset.fieldname];
             const dataType = input.dataset.datatype;
             const inputValue = input.value;
             const fieldName = input.dataset.fieldname;
@@ -652,13 +1070,70 @@
                     }
                 }
             }
+            else if (dataType === 'lookup') {
+                // override the original value by taking the dataset values
+                originalValue = `/${input.dataset.originalpluralname}(${input.dataset.originalid})`;
+
+                const tablesSelects = document.getElementsByClassName('lookupSelectTable');
+                const tableSelect = [...tablesSelects].find(f => f.dataset.fieldname === fieldName);
+
+                const tableSelectValue = tableSelect.value;
+
+                if (tableSelectValue == null || tableSelectValue === '') {
+                    alert('Error for lookup field: ' + fieldName + '. No table was selected. This should not be possible.');
+                    return;
+                }
+
+                const pluralName = await retrievePluralName(tableSelectValue)
+
+                value = `/${pluralName}(${inputValue})`;
+
+                if (input.dataset.editmode === 'update') {
+                    if (inputValue == null || inputValue === '') {
+                        alert('Error for lookup field: ' + fieldName + '. The field was marked for update but it is empty. If you do not want to edit this field, hit "undo changes".');
+                        return;
+                    }
+
+                    if (inputValue.length !== 36) {
+                        alert('Error for lookup field: ' + fieldName + '. The value ' + value + ' is not a valid guid.');
+                        return;
+                    }
+                } else if (input.dataset.editmode === 'makenull') {
+                    value = null;
+                } else {
+                    // skip if not action is required
+                    continue;
+                }
+            }
+
 
             if (value !== originalValue && !(value === '' && originalValue == null)) {
                 if (dataType === 'memo') {
                     if (originalValue?.replaceAll('\r\n', '\n') !== value) {
                         changedFields[fieldName] = value;
                     }
-                } else {
+                } else if (dataType == 'lookup') {
+                    const isMultipleTarget = input.dataset.ismultipletarget;
+                    let lookupFieldName = '';
+
+                    // isMultipleTarget is set as a pure boolean true but will be reduced to a string because it is an attribute
+                    if (isMultipleTarget === 'false') {
+                        lookupFieldName = `${fieldName}@odata.bind`;
+                    } else if (isMultipleTarget === 'true') {
+                        lookupFieldName = `${fieldName}_${input.dataset.logicalname}@odata.bind`;
+                    } else {
+                        alert('Invalid value for isMultipleTarget.');
+                        return;
+                    }
+
+                    if (!!previewChangesBeforeSaving) {
+                        changedFields[lookupFieldName + '____lookupOverride'] = true;
+                        changedFields[lookupFieldName + '____lookupOverrideOriginalValue'] = originalValue;
+                    }
+
+                    changedFields[lookupFieldName] = value;
+                }
+                else {
                     changedFields[fieldName] = value;
                 }
             }
@@ -670,12 +1145,12 @@
 
         const impersonateHeader = {};
         if (!!impersonateAnotherUser) {
-            if (impersonateAnotherUserInput == null || impersonateAnotherUserInput == '') {
+            if (impersonateAnotherUserInput == null || impersonateAnotherUserInput === '') {
                 alert('User impersonation was checked, but ' + impersonateAnotherUserField + ' is empty');
                 return;
             }
 
-            if (impersonateAnotherUserInput?.length != 36) {
+            if (impersonateAnotherUserInput?.length !== 36) {
                 alert('User impersonation input error: ' + impersonateAnotherUserInput + ' is not a valid guid.');
                 return;
             }
@@ -690,20 +1165,22 @@
             }
         }
 
-        const previewChangesBeforeSaving = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('previewChangesBeforeSavingBox')[0].checked;
         const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
 
         if (!!previewChangesBeforeSaving) {
             previewChanges(changedFields, pluralName, id, impersonateHeader);
             submitLink.style.display = 'none';
-            return;
+        } else {
+            await commitSave(pluralName, id, changedFields, impersonateHeader);
         }
-
-        await commitSave(pluralName, id, changedFields, impersonateHeader);
     }
 
     async function commitSave(pluralName, id, changedFields, impersonateHeader) {
         const requestUrl = apiUrl + pluralName + '(' + id + ')';
+
+        Object.keys(changedFields)
+            .filter(key => key.includes('____lookupOverride'))
+            .forEach(key => delete changedFields[key]);
 
         let headers = {
             'accept': 'application/json',
@@ -765,7 +1242,6 @@
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
-
         json = json.replaceAll('"', '').replaceAll(replacedQuote, escapeHtml('"'));
         json = json.replaceAll(',', '').replaceAll(replacedComma, ',');
 
@@ -780,6 +1256,7 @@
         setPreviewLinkClickHandlers();
         setEditLinkClickHandlers();
         setCopyToClipboardHandlers();
+        setLookupEditHandlers();
 
         if (!isMultiple && generateEditLink) {
             setImpersonateUserHandlers();
@@ -791,10 +1268,21 @@
 
         for (let key in changedFields) {
             const change = {};
-            const originalValue = window.originalResponseCopy[key];
+            let originalValue = window.originalResponseCopy[key];
             const updatedValue = changedFields[key];
 
-            change.column = key;
+            if (changedFields[key + '____lookupOverride'] === true) {
+                originalValue = changedFields[key + '____lookupOverrideOriginalValue'];
+
+                delete changedFields[key + '____lookupOverride'];
+                delete changedFields[key + '____lookupOverrideOriginalValue'];
+            }
+
+            if (key.includes('____lookupOverride')) {
+                continue;
+            }
+
+            change.column = key.replace('@odata.bind', '');
             change.old = originalValue;
             change.new = updatedValue;
             changes.push(change);
@@ -851,6 +1339,10 @@
         const textareas = document.getElementsByTagName('textarea');
         for (let i = 0; i < textareas.length; i++) {
             textareas[i].disabled = true;
+        }
+        const lookupEditLinks = document.getElementsByClassName('lookupEditLinks');
+        for (let i = 0; i < lookupEditLinks.length; i++) {
+            lookupEditLinks[i].style.display = 'none';
         }
     }
 
@@ -987,7 +1479,7 @@
                 margin: 0 0 0 8px;
             }
 
-            span {
+            span:not(.lookupField):not(.lookupEdit):not(.link) {
                 margin-right: 24px;
                 padding-right: 16px;
             }
