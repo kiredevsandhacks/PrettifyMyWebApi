@@ -499,6 +499,42 @@
         }
     }
 
+    function setLookupQueryByIdHandlers(input, lookupQueryResultPreview, selectTable) {
+        input.oninput = async () => await handlePreview();
+        selectTable.onchange = async () => await handlePreview();
+
+        async function handlePreview() {
+            // first fire this method so that the proper logicalname and pluralname is added to the input dataset
+            await handleTableSelect(selectTable, input);
+
+            if (!input.value) {
+                lookupQueryResultPreview.innerText = '';
+                return;
+            }
+
+            if (!selectTable.value) {
+                alert('selectTable does not contain a value. This should not happen.');
+                return;
+            }
+
+            const { plural, key, name } = await retrievePrimaryNameAndKeyAndPluralName(selectTable.value);
+
+            const retrievedRecord = await odataFetch(apiUrl + `${plural}(${input.value})?$select=${name}`);
+
+            if (retrievedRecord.error) {
+                lookupQueryResultPreview.innerText = retrievedRecord.error.message;
+            } else {
+                lookupQueryResultPreview.innerText = retrievedRecord[name];
+            }
+
+            //  else if (retrievedRecord.value.length == 1) {
+            //     lookupQueryResultPreview.innerText = retrievedRecord.value[0][name];
+            // } else {
+            //     lookupQueryResultPreview.innerText = 'Something went wrong with retrieving the systemuser.';
+            // }
+        }
+    }
+
     function setLookupEditHandlers() {
         const clearLookupLinks = document.getElementsByClassName('clearLookup');
 
@@ -707,6 +743,11 @@
 
         setInputMetadataForLookup(input, container, editMenuDiv);
 
+        const lookupQueryResultPreview = document.createElement('span');
+        lookupQueryResultPreview.style.margin = '0 0 0 10px';
+        editMenuDiv.appendChild(lookupQueryResultPreview);
+
+
         let targetToCache = lookupType;
         if (targetToCache === 'null' || targetToCache == null || targetToCache == undefined) {
             targetToCache = targets[0];
@@ -716,8 +757,10 @@
 
         initLookupMetadata(targetToCache, input);
 
-        selectTable.onchange = async () => await handleTableSelect(selectTable, input);
+        // fire the handle table select method so that we ensure that we have the proper dataset values for logicalname/pluralname on the input
+        handleTableSelect(selectTable, input);
 
+        setLookupQueryByIdHandlers(input, lookupQueryResultPreview, selectTable);
         return;
         // there is logic here for querying records. 
         // Not enabled for now as it's complicated and very hard to give a great user experience
@@ -767,7 +810,6 @@
         const pluralName = await retrievePluralName(logicalName);
         input.dataset.pluralname = pluralName;
         input.dataset.logicalname = logicalName;
-
     }
 
     async function handleTableSelectv2(selectTable, selectFilterField) {
