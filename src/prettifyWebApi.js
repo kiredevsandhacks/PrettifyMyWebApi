@@ -255,14 +255,14 @@
     }
 
     function createLookupEditField(displayName, guid, fieldname, lookupTypeValue, navigationPropertyValue) {
-        if (displayName === null) { // must be literal null check, because the lookup annotation can sometimes be undefined, for example on owninguser field
+        if (displayName == null) {
             displayName = '';
         }
 
         fieldname = fieldname.substring(1, fieldname.length - 1).substring(0, fieldname.length - 7);
 
         const formattedGuid = guid?.replace('{', '')?.replace('}', '');
-        return `<div class='lookupEditLinks' style='display:none;' data-fieldname='${escapeHtml(fieldname)}'><span class='link'>   <a href='javascript:' class='searchDifferentRecord lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Search for different record</a></span><span class='link'>   <a href='javascript:' class='clearLookup lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Clear lookup (set to null)</a></span><span class='link'>   <a href='javascript:' class='cancelLookupEdit lookupEditLink' data-fieldname='${escapeHtml(fieldname)}' style='display:none;'>Undo changes</a></span></div><span class='lookupEdit' style='display: none;'><div class='inputContainer containerNotEnabled' data-name='${escapeHtml(displayName)}' data-id='${escapeHtml(formattedGuid)}' data-fieldname='${escapeHtml(fieldname)}' data-lookuptype='${escapeHtml(lookupTypeValue)}' data-navigationproperty='${escapeHtml(navigationPropertyValue)}'></div></span>`;
+        return `<div class='lookupEditLinks' style='display:none;' data-fieldname='${escapeHtml(fieldname)}'><span class='link'>   <a href='javascript:' class='searchDifferentRecord lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Edit lookup</a></span><span class='link'>   <a href='javascript:' class='clearLookup lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Clear lookup</a></span><span class='link'>   <a href='javascript:' class='cancelLookupEdit lookupEditLink' data-fieldname='${escapeHtml(fieldname)}' style='display:none;'>Undo changes</a></span></div><span class='lookupEdit' style='display: none;'><div class='inputContainer containerNotEnabled' data-name='${escapeHtml(displayName)}' data-id='${escapeHtml(formattedGuid)}' data-fieldname='${escapeHtml(fieldname)}' data-lookuptype='${escapeHtml(lookupTypeValue)}' data-navigationproperty='${escapeHtml(navigationPropertyValue)}'></div></span>`;
     }
 
     function createdFormattedValueSpan(cls, value, fieldName, formattedValue) {
@@ -337,8 +337,8 @@
                 let lookupFormatted = '';
 
                 lookupFormatted += `<span class='lookupDisplay'>{<br>      ` +
-                    createLinkSpan('link', newApiUrl) + ' : ' +
-                    createLinkSpan('link', formUrl) + ' : ' +
+                    createLinkSpan('link', newApiUrl) + ' - ' +
+                    createLinkSpan('link', formUrl) + ' - ' +
                     createLinkSpan('link', previewUrl);
                 lookupFormatted += '<br>      '
                 lookupFormatted += createSpan(determineType(formattedValueValue), 'Name: ' + formattedValueValue);
@@ -1072,7 +1072,11 @@
             }
             else if (dataType === 'lookup') {
                 // override the original value by taking the dataset values
-                originalValue = `/${input.dataset.originalpluralname}(${input.dataset.originalid})`;
+                if (input.dataset.originalid !== 'null') {
+                    originalValue = `/${input.dataset.originalpluralname}(${input.dataset.originalid})`;
+                } else {
+                    originalValue = null;
+                }
 
                 const tablesSelects = document.getElementsByClassName('lookupSelectTable');
                 const tableSelect = [...tablesSelects].find(f => f.dataset.fieldname === fieldName);
@@ -1303,7 +1307,7 @@
 
         const undoAllLink = document.createElement('a');
         undoAllLink.innerText = 'Cancel';
-        undoAllLink.href = '#';
+        undoAllLink.href = 'javascript:';
 
         undoAllLink.onclick = makeItPretty;
 
@@ -1315,7 +1319,7 @@
 
         const submitChangesLink = document.createElement('a');
         submitChangesLink.innerText = 'Commit Save';
-        submitChangesLink.href = '#';
+        submitChangesLink.href = 'javascript:';
 
         // create this callback so we enclose the values we need when saving
         const saveCallback = async function () {
