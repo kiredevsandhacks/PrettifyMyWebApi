@@ -278,7 +278,7 @@
         return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
-    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested) {
+    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel) {
         const recordId = jsonObj[primaryIdAttribute]; // we need to get this value before parsing or else it will contain html
 
         const ordered = orderProperties(jsonObj);
@@ -295,7 +295,7 @@
                     for (let nestedKey in value) {
                         let nestedValue = value[nestedKey];
 
-                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, null, true);
+                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, null, true, nestedLevel + 1);
                     }
                 }
                 else {
@@ -311,7 +311,7 @@
             }
 
             if (typeof (value) === 'object' && value != null) {
-                ordered[key] = await enrichObjectWithHtml(value, null, null, null, null, true);
+                ordered[key] = await enrichObjectWithHtml(value, null, null, null, null, true, nestedLevel + 1);
                 continue;
             }
 
@@ -325,6 +325,11 @@
                 value = value.replaceAll(',', replacedComma);
             }
 
+            // this code is to fix the layout of lookups, 'manually' adding the spaces
+            // hacky, but it works
+            const increment = nestedLevel == 1 ? 0 : 3;
+            const spaces = new Array(1 + increment + nestedLevel * 3).join(" ");
+
             if (keyHasLookupAnnotation(key, ordered)) {
                 const formattedValueValue = ordered[key + formattedValueType];
                 const navigationPropertyValue = ordered[key + navigationPropertyType];
@@ -336,18 +341,18 @@
 
                 let lookupFormatted = '';
 
-                lookupFormatted += `<span class='lookupDisplay'>{<br>      ` +
+                lookupFormatted += `<span class='lookupDisplay'>{<br>   ` + spaces +
                     createLinkSpan('link', newApiUrl) + ' - ' +
                     createLinkSpan('link', formUrl) + ' - ' +
                     createLinkSpan('link', previewUrl);
-                lookupFormatted += '<br>      '
-                lookupFormatted += createSpan(determineType(formattedValueValue), 'Name: ' + formattedValueValue);
-                lookupFormatted += '<br>      '
-                lookupFormatted += createSpan(determineType(lookupTypeValue), 'LogicalName: ' + lookupTypeValue);
-                lookupFormatted += '<br>      '
-                lookupFormatted += createSpan(determineType(navigationPropertyValue), 'NavigationProperty: ' + navigationPropertyValue);
+                lookupFormatted += '<br>   '
+                lookupFormatted += spaces + createSpan(determineType(formattedValueValue), 'Name: ' + formattedValueValue);
+                lookupFormatted += '<br>   '
+                lookupFormatted += spaces + createSpan(determineType(lookupTypeValue), 'LogicalName: ' + lookupTypeValue);
+                lookupFormatted += '<br>   '
+                lookupFormatted += spaces + createSpan(determineType(navigationPropertyValue), 'NavigationProperty: ' + navigationPropertyValue);
                 lookupFormatted += '<br>'
-                lookupFormatted += '   }';
+                lookupFormatted += spaces + '}';
                 lookupFormatted += '</span>';
                 lookupFormatted += `<span class='lookupEdit' style='display:none;' >`;
                 lookupFormatted += createSpanForLookup('string', formattedValueValue);
@@ -1278,13 +1283,13 @@
             delete jsonObj.value;
 
             for (const key in jsonObj[valueKeyWithCount]) {
-                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false);
+                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2);
             }
         } else {
             if (generateEditLink) {
                 window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
             }
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, generateEditLink, false);
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, generateEditLink, false, 1);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
