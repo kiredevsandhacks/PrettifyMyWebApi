@@ -982,7 +982,11 @@
                 }
             } else if (attributeType === 'Lookup') {
                 const targets = attribute.Targets;
-                createLookupInput(container, targets);
+                
+                // not all lookups are targeted to a table apparently, skip if there are no targets
+                if (targets.length > 0) {
+                    createLookupInput(container, targets);
+                }
             } else if (attributeType === 'DateTime') {
                 // todo
             } else if (attributeType === 'Uniqueidentifier') {
