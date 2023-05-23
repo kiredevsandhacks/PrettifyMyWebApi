@@ -1,4 +1,8 @@
 (async function () {
+    if (window.location.hash != '#p') {
+        return;
+    }
+
     const formattedValueType = '@OData.Community.Display.V1.FormattedValue';
     const navigationPropertyType = '@Microsoft.Dynamics.CRM.associatednavigationproperty';
     const lookupType = '@Microsoft.Dynamics.CRM.lookuplogicalname';
@@ -195,7 +199,7 @@
     async function generateApiAnchorAsync(logicalName, guid) {
         const pluralName = await retrievePluralName(logicalName);
         const formattedGuid = guid.replace('{', '').replace('}', '');
-        const newLocation = apiUrl + escapeHtml(pluralName) + '(' + escapeHtml(formattedGuid) + ')';
+        const newLocation = apiUrl + escapeHtml(pluralName) + '(' + escapeHtml(formattedGuid) + ')#p';
 
         return `<a target='_blank' href='${newLocation}'>${escapeHtml(formattedGuid)}</a>`;
     }
@@ -208,7 +212,7 @@
 
     function generateWebApiAnchor(guid, pluralName) {
         const formattedGuid = guid.replace('{', '').replace('}', '');
-        const newLocation = apiUrl + escapeHtml(pluralName) + '(' + escapeHtml(formattedGuid) + ')';
+        const newLocation = apiUrl + escapeHtml(pluralName) + '(' + escapeHtml(formattedGuid) + ')#p';
 
         return `<a target='_blank' href='${newLocation}'>Open in Web Api</a>`;
     }
@@ -701,6 +705,7 @@
         input.dataset.originalid = id;
         input.dataset.logicalname = lookupType;
         input.dataset.originallogicalname = lookupType;
+        input.dataset.navigationproperty = navigationProperty;
 
         const selectTable = document.createElement('select');
         selectTable.style.height = '22px';
@@ -982,7 +987,7 @@
                 }
             } else if (attributeType === 'Lookup') {
                 const targets = attribute.Targets;
-                
+
                 // not all lookups are targeted to a table apparently, skip if there are no targets
                 if (targets.length > 0) {
                     createLookupInput(container, targets);
@@ -1173,9 +1178,9 @@
 
                     // isMultipleTarget is set as a pure boolean true but will be reduced to a string because it is an attribute
                     if (isMultipleTarget === 'false') {
-                        lookupFieldName = `${fieldName}@odata.bind`;
+                        lookupFieldName = `${input.dataset.navigationproperty}@odata.bind`;
                     } else if (isMultipleTarget === 'true') {
-                        lookupFieldName = `${fieldName}_${input.dataset.logicalname}@odata.bind`;
+                        lookupFieldName = `${input.dataset.navigationproperty}_${input.dataset.logicalname}@odata.bind`;
                     } else {
                         alert('Invalid value for isMultipleTarget.');
                         return;
@@ -1301,13 +1306,37 @@
         json = json.replaceAll(',', '').replaceAll(replacedComma, ',');
 
         htmlElement.innerText = '';
+
         const pre = document.createElement('pre');
+        htmlElement.appendChild(pre).innerHTML = json;
 
         if (generateEditLink) {
             pre.classList.add('mainPanel');
+
+            debugger
+            pre.style.position = 'relative';
+
+            const btn = document.createElement('button');
+            btn.style = `
+            height: 30px;
+            width: auto;
+            margin-right: 24px;
+            margin-top: 10px;
+            position: absolute;
+            right: 10px;
+            cursor: pointer;
+            padding:0;
+            font-size:24;
+            padding: 0px 4px 0px 4px;
+            `
+
+            btn.innerHTML = '<div>View as raw JSON</div>';
+            btn.onclick = () => { window.location.href = window.location.href.split('#')[0]; };
+
+            pre.prepend(btn);
         }
 
-        htmlElement.appendChild(pre).innerHTML = json;
+
         setPreviewLinkClickHandlers();
         setEditLinkClickHandlers();
         setCopyToClipboardHandlers();

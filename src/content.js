@@ -5,12 +5,12 @@ scriptTag.type = "text/javascript";
 document.head.appendChild(scriptTag);
 
 function handler(event) {
-    if (event.source === window) {
+    if (event.origin === window.origin) {
         if (event.data.action === 'prettifyWebApi') {
-            chrome.runtime.sendMessage(event.data);
+            chrome.runtime.sendMessage({ action: "prettifyWebApi" });
         } else if (event.data.action === 'openInWebApi') {
             if (event.data.url.startsWith('https://')) {
-                window.open(event.data.url);
+                chrome.runtime.sendMessage({ action: "openInWebApi", url: event.data.url });
             }
         }
     }

@@ -12,13 +12,22 @@
         "activeTab",
         "scripting"
     ],
-    "web_accessible_resources": [
-        {
+    "web_accessible_resources": [        {
             "resources": [
                 "eventHandler.js"
             ],
             "matches": [
-                "<all_urls>"
+                "*://*.dynamics.com/*"
+            ]
+        }
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "*://*.dynamics.com/api/data/*"
+            ],
+            "js": [
+                "prettifyWebApi.js"
             ]
         }
     ],

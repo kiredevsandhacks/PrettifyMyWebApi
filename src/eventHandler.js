@@ -30,10 +30,10 @@
     }
 
     if (window.Xrm && window.Xrm.Page) {
-        const newLocation = await getWebApiUrl();
-
+        const newLocation = await getWebApiUrl() + '#p';
         window.postMessage({ action: "openInWebApi", url: newLocation });
     } else if (/\/api\/data\/v[0-9][0-9]?.[0-9]\//.test(window.location.pathname)) {
+        window.location.hash = 'p';
         window.postMessage({ action: "prettifyWebApi" });
     }
 })()
