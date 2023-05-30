@@ -1178,9 +1178,9 @@
 
                     // isMultipleTarget is set as a pure boolean true but will be reduced to a string because it is an attribute
                     if (isMultipleTarget === 'false') {
-                        lookupFieldName = `${input.dataset.navigationproperty}@odata.bind`;
+                        lookupFieldName = `${fieldName}@odata.bind`;
                     } else if (isMultipleTarget === 'true') {
-                        lookupFieldName = `${input.dataset.navigationproperty}_${input.dataset.logicalname}@odata.bind`;
+                        lookupFieldName = `${fieldName}_${input.dataset.logicalname}@odata.bind`;
                     } else {
                         alert('Invalid value for isMultipleTarget.');
                         return;
@@ -1313,7 +1313,6 @@
         if (generateEditLink) {
             pre.classList.add('mainPanel');
 
-            debugger
             pre.style.position = 'relative';
 
             const btn = document.createElement('button');
