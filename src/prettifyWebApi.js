@@ -26,6 +26,8 @@
     const retrievedPrimaryNamesAndKeys = {};
     const lazyLookupInitFunctions = {};
     const retrievedSearchableAttributes = {};
+    const retrievedClientMetadataPerEntity = {};
+
     let allPluralNames = null;
 
     async function odataFetch(url) {
@@ -40,6 +42,14 @@
         const table = pluralNames.find(p => p.LogicalName === logicalName);
 
         return table.EntitySetName;
+    }
+
+    async function retrieveLogicalName(pluralName) {
+        const pluralNames = await retrieveAllPluralNames();
+
+        const table = pluralNames.find(p => p.EntitySetName === pluralName);
+
+        return table.LogicalName;
     }
 
     async function retrieveAllPluralNames() {
@@ -116,7 +126,7 @@
         return json.value;
     }
 
-    async function retrieveOptionSetMetadata(logicalName, fieldname) {
+    async function retrieveOptionSetMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
         const json = await odataFetch(requestUrl);
@@ -124,7 +134,7 @@
         return json.value;
     }
 
-    async function retrieveBooleanFieldMetadata(logicalName, fieldname) {
+    async function retrieveBooleanFieldMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
         const json = await odataFetch(requestUrl);
@@ -132,6 +142,43 @@
         return json.value;
     }
 
+    async function initEntityClientMetadataForCurrentRecord() {
+        const currentRecordLogicalName = await retrieveLogicalName(window.currentEntityPluralName);
+        await retrieveEntityClientMetadata(currentRecordLogicalName);
+    }
+
+    async function retrieveEntityClientMetadata(logicalName) {
+        if (retrievedClientMetadataPerEntity.hasOwnProperty(logicalName)) {
+            return retrievedClientMetadataPerEntity[logicalName];
+        }
+
+        const requestUrl = apiUrl + "GetClientMetadata(ClientMetadataQuery=@ClientMetadataQuery)?@ClientMetadataQuery={'MetadataType':'entity','MetadataSubtype':'{\"" + logicalName + "\":[\"merged\"]}'}";
+
+        const json = await odataFetch(requestUrl);
+        const clientMetadata = JSON.parse(json.Metadata);
+        retrievedClientMetadataPerEntity[logicalName] = clientMetadata;
+
+        return clientMetadata;
+    }
+
+    async function retrieveNavigationProperty(lookupEntitylogicalName, fieldName) {
+        const currentRecordLogicalName = await retrieveLogicalName(window.currentEntityPluralName);
+
+        const metadata = await retrieveEntityClientMetadata(currentRecordLogicalName);
+
+        if (metadata.Entities.length != 1) {
+            alert(`Something went wrong with retrieving the navigation property for ${currentRecordLogicalName}/${lookupEntitylogicalName}/${fieldName}: ${metadata.Entities.length} entities found. This should not happen.`);
+            return null;
+        }
+
+        const relations = metadata.Entities[0].ManyToOneRelationships.filter(rel => rel.ReferencingEntity === currentRecordLogicalName && rel.ReferencedEntity === lookupEntitylogicalName && rel.ReferencingAttribute === fieldName);
+        if (relations.length != 1) {
+            alert(`Something went wrong with retrieving the navigation property for ${currentRecordLogicalName}/${lookupEntitylogicalName}/${fieldName}: ${relations.length} entities found. This should not happen.`);
+            return null;
+        }
+
+        return relations[0].ReferencingEntityNavigationPropertyName;
+    }
 
     async function doLookupInputQuery(pluralName, fieldToFilterOn, fieldToDisplay, primaryKeyfieldname, query) {
         query = query.replaceAll(`'`, `''`);
@@ -258,7 +305,7 @@
         return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
-    function createLookupEditField(displayName, guid, fieldname, lookupTypeValue, navigationPropertyValue) {
+    function createLookupEditField(displayName, guid, fieldname, lookupTypeValue) {
         if (displayName == null) {
             displayName = '';
         }
@@ -266,7 +313,7 @@
         fieldname = fieldname.substring(1, fieldname.length - 1).substring(0, fieldname.length - 7);
 
         const formattedGuid = guid?.replace('{', '')?.replace('}', '');
-        return `<div class='lookupEditLinks' style='display:none;' data-fieldname='${escapeHtml(fieldname)}'><span class='link'>   <a href='javascript:' class='searchDifferentRecord lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Edit lookup</a></span><span class='link'>   <a href='javascript:' class='clearLookup lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Clear lookup</a></span><span class='link'>   <a href='javascript:' class='cancelLookupEdit lookupEditLink' data-fieldname='${escapeHtml(fieldname)}' style='display:none;'>Undo changes</a></span></div><span class='lookupEdit' style='display: none;'><div class='inputContainer containerNotEnabled' data-name='${escapeHtml(displayName)}' data-id='${escapeHtml(formattedGuid)}' data-fieldname='${escapeHtml(fieldname)}' data-lookuptype='${escapeHtml(lookupTypeValue)}' data-navigationproperty='${escapeHtml(navigationPropertyValue)}'></div></span>`;
+        return `<div class='lookupEditLinks' style='display:none;' data-fieldname='${escapeHtml(fieldname)}'><span class='link'>   <a href='javascript:' class='searchDifferentRecord lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Edit lookup</a></span><span class='link'>   <a href='javascript:' class='clearLookup lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Clear lookup</a></span><span class='link'>   <a href='javascript:' class='cancelLookupEdit lookupEditLink' data-fieldname='${escapeHtml(fieldname)}' style='display:none;'>Undo changes</a></span></div><span class='lookupEdit' style='display: none;'><div class='inputContainer containerNotEnabled' data-name='${escapeHtml(displayName)}' data-id='${escapeHtml(formattedGuid)}' data-fieldname='${escapeHtml(fieldname)}' data-lookuptype='${escapeHtml(lookupTypeValue)}'></div></span>`;
     }
 
     function createdFormattedValueSpan(cls, value, fieldName, formattedValue) {
@@ -361,7 +408,7 @@
                 lookupFormatted += `<span class='lookupEdit' style='display:none;' >`;
                 lookupFormatted += createSpanForLookup('string', formattedValueValue);
                 lookupFormatted += '</span>';
-                lookupFormatted += createLookupEditField(formattedValueValue, value, key, lookupTypeValue, navigationPropertyValue);
+                lookupFormatted += createLookupEditField(formattedValueValue, value, key, lookupTypeValue);
                 ordered[key] = lookupFormatted;
 
                 delete ordered[key + formattedValueType];
@@ -548,24 +595,34 @@
         const clearLookupLinks = document.getElementsByClassName('clearLookup');
 
         for (let link of clearLookupLinks) {
-            const logicalName = link.dataset.fieldname;
-            link.onclick = () => {
+            const fieldName = link.dataset.fieldname;
+            link.onclick = async () => {
                 const enabledInputFields = document.getElementsByClassName('enabledInputField');
-                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === logicalName);
+                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === fieldName);
+
+                const navigationProperty = await retrieveNavigationProperty(lookup.dataset.logicalname, fieldName);
+
+                if (navigationProperty == null) {
+                    // user was already alerted at this point
+                    return;
+                }
+
+                lookup.dataset.navigationproperty = navigationProperty;
+
                 lookup.value = null;
                 lookup.dataset.id = null;
                 lookup.dataset.editmode = 'makenull';
 
-                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === logicalName);
+                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === fieldName);
                 makeNullDiv.style.display = 'block';
 
                 const lookupEditMenuDivs = document.getElementsByClassName('lookupEditMenuDiv');
-                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === logicalName);
+                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === fieldName);
 
                 lookupEditMenuDiv.style.display = 'none';
 
                 const cancelLookupEditDivs = document.getElementsByClassName('cancelLookupEdit');
-                const cancelLookupEditDiv = [...cancelLookupEditDivs].find(f => f.dataset.fieldname === logicalName);
+                const cancelLookupEditDiv = [...cancelLookupEditDivs].find(f => f.dataset.fieldname === fieldName);
                 cancelLookupEditDiv.style.display = 'unset';
             };
         }
@@ -573,46 +630,56 @@
         const searchDifferentRecordLinks = document.getElementsByClassName('searchDifferentRecord');
 
         for (let link of searchDifferentRecordLinks) {
-            const logicalName = link.dataset.fieldname;
+            const fieldName = link.dataset.fieldname;
             link.onclick = async () => {
                 const enabledInputFields = document.getElementsByClassName('enabledInputField');
-                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === logicalName);
+                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === fieldName);
+                const navigationProperty = await retrieveNavigationProperty(lookup.dataset.logicalname, fieldName);
+
+                if (navigationProperty == null) {
+                    // user was already alerted at this point
+                    return;
+                }
+
+                lookup.dataset.navigationproperty = navigationProperty;
+
                 lookup.dataset.editmode = 'update';
 
                 const lookupEditMenuDivs = document.getElementsByClassName('lookupEditMenuDiv');
-                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === logicalName);
+                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === fieldName);
 
                 lookupEditMenuDiv.style.display = 'unset';
 
-                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === logicalName);
+                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === fieldName);
                 makeNullDiv.style.display = 'none';
 
                 const cancelLookupEditDivs = document.getElementsByClassName('cancelLookupEdit');
-                const cancelLookupEditDiv = [...cancelLookupEditDivs].find(f => f.dataset.fieldname === logicalName);
+                const cancelLookupEditDiv = [...cancelLookupEditDivs].find(f => f.dataset.fieldname === fieldName);
                 cancelLookupEditDiv.style.display = 'unset';
 
-                await lazyLookupInitFunctions[logicalName]?.call();
+                // uncommented for now
+                // await lazyLookupInitFunctions[fieldName]?.call();
             };
         }
 
         const cancelLookupEditLinks = document.getElementsByClassName('cancelLookupEdit');
 
         for (let link of cancelLookupEditLinks) {
-            const logicalName = link.dataset.fieldname;
+            const fieldName = link.dataset.fieldname;
             link.onclick = () => {
                 const enabledInputFields = document.getElementsByClassName('enabledInputField');
-                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === logicalName);
+                const lookup = [...enabledInputFields].find(f => f.dataset.fieldname === fieldName);
                 lookup.value = lookup.dataset.originalname;
                 lookup.dataset.id = lookup.dataset.originalid;
                 lookup.dataset.editmode = null;
 
                 link.style.display = 'none';
 
-                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === logicalName);
+                const makeNullDiv = [...document.getElementsByClassName('makeLookupNullDiv')].find(f => f.dataset.fieldname === fieldName);
                 makeNullDiv.style.display = 'none';
 
                 const lookupEditMenuDivs = document.getElementsByClassName('lookupEditMenuDiv');
-                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === logicalName);
+                const lookupEditMenuDiv = [...lookupEditMenuDivs].find(f => f.dataset.fieldname === fieldName);
 
                 lookupEditMenuDiv.style.display = 'none';
             };
@@ -696,7 +763,6 @@
         const fieldName = container.dataset.fieldname;
         const name = container.dataset.name;
         const lookupType = container.dataset.lookuptype;
-        const navigationProperty = container.dataset.navigationproperty;
 
         const input = document.createElement('input');
         input.placeholder = '00000000-0000-0000-0000-000000000000';
@@ -705,7 +771,6 @@
         input.dataset.originalid = id;
         input.dataset.logicalname = lookupType;
         input.dataset.originallogicalname = lookupType;
-        input.dataset.navigationproperty = navigationProperty;
 
         const selectTable = document.createElement('select');
         selectTable.style.height = '22px';
@@ -820,6 +885,7 @@
         const pluralName = await retrievePluralName(logicalName);
         input.dataset.pluralname = pluralName;
         input.dataset.logicalname = logicalName;
+        input.dataset.navigationproperty = await retrieveNavigationProperty(logicalName, input.dataset.fieldname);
     }
 
     async function handleTableSelectv2(selectTable, selectFilterField) {
@@ -942,6 +1008,8 @@
     }
 
     async function editRecord(logicalName, pluralName, id) {
+        await initEntityClientMetadataForCurrentRecord();
+
         const editLink = document.getElementsByClassName('editLink')[0];
         editLink.style.display = 'none';
 
@@ -1173,18 +1241,7 @@
                         changedFields[fieldName] = value;
                     }
                 } else if (dataType == 'lookup') {
-                    const isMultipleTarget = input.dataset.ismultipletarget;
-                    let lookupFieldName = '';
-
-                    // isMultipleTarget is set as a pure boolean true but will be reduced to a string because it is an attribute
-                    if (isMultipleTarget === 'false') {
-                        lookupFieldName = `${fieldName}@odata.bind`;
-                    } else if (isMultipleTarget === 'true') {
-                        lookupFieldName = `${fieldName}_${input.dataset.logicalname}@odata.bind`;
-                    } else {
-                        alert('Invalid value for isMultipleTarget.');
-                        return;
-                    }
+                    const lookupFieldName = `${input.dataset.navigationproperty}@odata.bind`;
 
                     if (!!previewChangesBeforeSaving) {
                         changedFields[lookupFieldName + '____lookupOverride'] = true;
