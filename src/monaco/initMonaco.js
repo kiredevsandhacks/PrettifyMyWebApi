@@ -13,11 +13,12 @@
 <div id="diffEditorContainer" class="monacoContainer" style="display: none;"></div>
                 
 <div class="monacoActions">
-  <label class="monacoLabel">Show differences</label>
-  <input type="checkbox" style="width:unset;" class="showDifferenceInput" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <button id="prettifyJsonButton">Prettify JSON</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <button id="backupFlowButton">Create backup</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <button id="saveFlowButton">Save Flow</button>
+  <label class="monacoLabel" id="monacoLabel" style="cursor:pointer;">Show differences</label>
+  <input type="checkbox" style="width:unset;cursor:pointer;" class="showDifferenceInput" id="showDifferenceInput">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <button id="prettifyJsonButton" style="cursor:pointer;">Prettify JSON</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <button id="backupFlowButton" style="cursor:pointer;">Create backup</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <button id="saveFlowButton" style="cursor:pointer;">Save Flow</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <button id="cancelEditFlowButton" style="cursor:pointer;">Cancel edit</button>
 </div>`;
 
     const btn = document.createElement('button');
@@ -77,6 +78,10 @@
         diffEditor.getModel().modified.setValue(modified);
     }
 
+    function setDiffEditorOriginalValue(original) {
+        diffEditor.getModel().original.setValue(original);
+    }
+
     function backupFlow(name, text) {
         const element = document.createElement('a');
         element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
@@ -121,7 +126,8 @@
 
         if (response.ok) {
             alert('Changes saved!');
-            window.location.reload();
+            originalValue = text;
+            setDiffEditorOriginalValue(text);
         } else {
             const errorText = await response.text();
             console.error(`${response.status} - ${errorText}`);
@@ -147,6 +153,10 @@
 
         createRegularEditor(originalValue);
         createDiffEditor(originalValue);
+
+        document.getElementById('monacoLabel').onclick = async () => {
+            document.getElementById('showDifferenceInput').click();
+        }
 
         document.querySelector('.showDifferenceInput').addEventListener('change', (e) => {
             if (e.target.checked) {
@@ -186,6 +196,10 @@
             }
 
             backupFlow(name + '.json', originalValue);
+        }
+
+        document.getElementById('cancelEditFlowButton').onclick = async () => {
+            window.location.reload();
         }
     });
 })()
