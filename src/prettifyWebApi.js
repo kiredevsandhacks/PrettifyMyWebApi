@@ -1349,13 +1349,12 @@
         scriptTag.type = "text/javascript";
         document.head.appendChild(scriptTag);
 
-        // TODO check if we really need thid
         window.setTimeout(() => {
             let scriptTagInit = document.createElement('script');
             scriptTagInit.src = chrome.runtime.getURL('monaco/initMonaco.js');
             scriptTagInit.type = "text/javascript";
             document.head.appendChild(scriptTagInit);
-        }, 100);
+        }, 200);
 
     }
 

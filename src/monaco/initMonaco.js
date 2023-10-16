@@ -121,6 +121,7 @@
 
         if (response.ok) {
             alert('Changes saved!');
+            window.location.reload();
         } else {
             const errorText = await response.text();
             console.error(`${response.status} - ${errorText}`);
@@ -129,65 +130,62 @@
     }
 
     let editMode = 'regular';
+    let originalValue = JSON.stringify(JSON.parse(mainPanel.dataset.clientdata), null, 2);
 
-    window.setTimeout(() => {
-        require.config({ paths: { vs: chromeRuntimeUrl + 'monaco' } });
+    require.config({ paths: { vs: chromeRuntimeUrl + 'monaco' } });
 
-        require(['vs/editor/editor.main'], function () {
-            monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
-                validate: true,
-                schemas: [
-                    {
-                        fileMatch: ['*'],
-                        schema: {}
-                    }
-                ]
-            });
-
-            const originalValue = JSON.stringify(JSON.parse(mainPanel.dataset.clientdata), null, 2);
-
-            createRegularEditor(originalValue);
-            createDiffEditor(originalValue);
-
-            document.querySelector('.showDifferenceInput').addEventListener('change', (e) => {
-                if (e.target.checked) {
-                    editMode = 'diff';
-                    setDiffEditorValue(regularEditor.getModel().getValue());
-                    document.getElementById('regularEditorContainer').style.display = 'none'
-                    document.getElementById('diffEditorContainer').style.display = null
-                } else {
-                    editMode = 'regular';
-                    setRegularEditorValue(diffEditor.getModel().modified.getValue());
-                    document.getElementById('regularEditorContainer').style.display = null
-                    document.getElementById('diffEditorContainer').style.display = 'none'
+    require(['vs/editor/editor.main'], function () {
+        monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+            validate: true,
+            schemas: [
+                {
+                    fileMatch: ['*'],
+                    schema: {}
                 }
-            });
+            ]
+        });
 
-            btn.style.display = null;
-            btn.onclick = async () => {
-                container.style.display = null;
+        createRegularEditor(originalValue);
+        createDiffEditor(originalValue);
 
-                const panels = document.getElementsByClassName('panel');
-                for (let i = 0; i < panels.length; i++) {
-                    panels[i].style.display = 'none';
-                }
-            };
-
-            document.getElementById('saveFlowButton').onclick = async () => {
-                if (confirm('Save this flow?')) {
-                    await commitSave(getEditorValue());
-                }
-            }
-
-            document.getElementById('backupFlowButton').onclick = () => {
-                let name = mainPanel.dataset.flowName;
-
-                if (name == null || name == 'undefined') {
-                    name = mainPanel.dataset.recordId;
-                }
-
-                backupFlow(name + '.json', getEditorValue());
+        document.querySelector('.showDifferenceInput').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                editMode = 'diff';
+                setDiffEditorValue(regularEditor.getModel().getValue());
+                document.getElementById('regularEditorContainer').style.display = 'none'
+                document.getElementById('diffEditorContainer').style.display = null
+            } else {
+                editMode = 'regular';
+                setRegularEditorValue(diffEditor.getModel().modified.getValue());
+                document.getElementById('regularEditorContainer').style.display = null
+                document.getElementById('diffEditorContainer').style.display = 'none'
             }
         });
-    }, 2000);
+
+        btn.style.display = null;
+        btn.onclick = async () => {
+            container.style.display = null;
+
+            const panels = document.getElementsByClassName('panel');
+            for (let i = 0; i < panels.length; i++) {
+                panels[i].style.display = 'none';
+            }
+        };
+
+        document.getElementById('saveFlowButton').onclick = async () => {
+            if (confirm('Save this flow?')) {
+                await commitSave(getEditorValue());
+            }
+        }
+
+        document.getElementById('backupFlowButton').onclick = () => {
+            let name = mainPanel.dataset.flowName;
+
+            if (name == null || name == 'undefined') {
+                name = mainPanel.dataset.recordId;
+            }
+
+            backupFlow(name + '.json', originalValue);
+        }
+    });
 })()
