@@ -1,5 +1,5 @@
 (async function () {
-    if (window.location.hash != '#p') {
+    if (window.location.hash !== '#p' && window.location.hash !== '#pf') {
         return;
     }
 
@@ -736,8 +736,8 @@
 
         let selectHtml = "<option value='null'>null</option>"; // empty option for clearing it
 
-        const falseFormatted = 'false : ' + falseOption.Label.UserLocalizedLabel.Label;
-        const trueFormatted = 'true : ' + trueOption.Label.UserLocalizedLabel.Label;
+        const falseFormatted = 'false : ' + falseOption?.Label?.UserLocalizedLabel?.Label ?? 'false';
+        const trueFormatted = 'true : ' + trueOption?.Label?.UserLocalizedLabel?.Label ?? 'true';
         // TODO: refactor the value attribute to contain the pure values, true/false/null
         selectHtml += `<option value='${escapeHtml(falseFormatted)}'>${escapeHtml(falseFormatted)}</option>`;
         selectHtml += `<option value='${escapeHtml(trueFormatted)}'>${escapeHtml(trueFormatted)}</option>`;
@@ -1337,12 +1337,44 @@
         return stringContains(key, formattedValueType) || stringContains(key, navigationPropertyType) || stringContains(key, lookupType);
     }
 
-    async function prettifyWebApi(jsonObj, htmlElement, pluralName, generateEditLink) {
+
+    function createMonacoEditorControls(mainPanel, recordId) {
+        mainPanel.dataset.chromeRuntimeUrl = chrome.runtime.getURL('');
+        mainPanel.dataset.flowName = originalResponseCopy.name;
+        mainPanel.dataset.recordId = recordId;
+        mainPanel.dataset.apiUrl = apiUrl;
+
+        let scriptTag = document.createElement('script');
+        scriptTag.src = chrome.runtime.getURL('monaco/loader.js');
+        scriptTag.type = "text/javascript";
+        document.head.appendChild(scriptTag);
+
+        // TODO check if we really need thid
+        window.setTimeout(() => {
+            let scriptTagInit = document.createElement('script');
+            scriptTagInit.src = chrome.runtime.getURL('monaco/initMonaco.js');
+            scriptTagInit.type = "text/javascript";
+            document.head.appendChild(scriptTagInit);
+        }, 100);
+
+    }
+
+    async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview) {
         const isMultiple = (jsonObj.value && Array.isArray(jsonObj.value));
 
         const result = await retrieveLogicalNameFromPluralNameAsync(pluralName);
 
+        let singleRecordId = '';
+
+        if (window.location.hash === '#pf' && jsonObj.value.length === 1) {
+            const recordId = jsonObj.value[0][result.primaryIdAttribute];
+            const newUrl = apiUrl + pluralName + "(" + recordId + ")#p";
+            window.location.href = newUrl;
+            return;
+        }
+
         if (isMultiple) {
+            document.title = pluralName;
             const valueKeyWithCount = 'value (' + jsonObj.value.length + ' records)';
 
             jsonObj[valueKeyWithCount] = jsonObj.value;
@@ -1352,10 +1384,14 @@
                 jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2);
             }
         } else {
-            if (generateEditLink) {
+            document.title = result.logicalName;
+
+            if (!isPreview) {
                 window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
             }
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, generateEditLink, false, 1);
+
+            singleRecordId = jsonObj[result.primaryIdAttribute];
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
@@ -1367,8 +1403,9 @@
         const pre = document.createElement('pre');
         htmlElement.appendChild(pre).innerHTML = json;
 
-        if (generateEditLink) {
+        if (!isPreview) {
             pre.classList.add('mainPanel');
+            pre.classList.add('panel');
 
             pre.style.position = 'relative';
 
@@ -1392,13 +1429,17 @@
             pre.prepend(btn);
         }
 
+        if (!isPreview && !isMultiple && pluralName === 'workflows' && window.originalResponseCopy.hasOwnProperty('clientdata') && window.originalResponseCopy.clientdata?.startsWith('{"')) {
+            createMonacoEditorControls(pre, singleRecordId);
+            pre.dataset.clientdata = window.originalResponseCopy.clientdata;
+        }
 
         setPreviewLinkClickHandlers();
         setEditLinkClickHandlers();
         setCopyToClipboardHandlers();
         setLookupEditHandlers();
 
-        if (!isMultiple && generateEditLink) {
+        if (!isMultiple && isPreview) {
             setImpersonateUserHandlers();
         }
     }
@@ -1487,32 +1528,21 @@
     }
 
     async function previewRecord(pluralName, url) {
-        const cssBody = `body {
-            display: inline-flex;
-            margin-top: 0px;
-            margin-bottom: 0px;
-            }
-            `
-        addcss(cssBody);
-        const cssPre = `pre {
-            width: 49vw;
-            overflow-x: scroll;
-            overflow-y: scroll;
-            height: 100%;
-            margin: 0px;
-            }
-            `
-        addcss(cssPre);
+        document.getElementsByClassName('mainPanel')[0].classList.add("prePreviewed");
+        document.body.classList.add("bodyPreviewed");
 
         const newDiv = document.createElement('div');
+        newDiv.classList.add('panel');
         newDiv.classList.add('previewPanel');
+        newDiv.classList.add('prePreviewed');
+
         document.body.appendChild(newDiv);
 
         newDiv.style = 'position:relative;'
 
         const response = await odataFetch(url);
 
-        await prettifyWebApi(response, newDiv, pluralName, false);
+        await prettifyWebApi(response, newDiv, pluralName, true);
 
         const btn = document.createElement('button');
         btn.style = `
@@ -1532,7 +1562,8 @@
 
         btn.addEventListener('click', function () {
             if (document.getElementsByClassName('previewPanel').length === 1) {
-                resetCSS();
+                document.getElementsByClassName('mainPanel')[0].classList.remove("prePreviewed");
+                document.body.classList.remove("bodyPreviewed");
             }
 
             newDiv.remove();
@@ -1583,20 +1614,31 @@
     }
 
     async function makeItPretty() {
+        if (window.location.hash === '#pf') {
+            document.body.innerText = 'Loading your flow...';
+        }
+
         const response = await odataFetch(window.location.href);
 
         window.currentEntityPluralName = window.location.pathname.split('/').pop().split('(').shift();
 
-        resetCSS();
+        await prettifyWebApi(response, document.body, window.currentEntityPluralName, false);
 
-        await prettifyWebApi(response, document.body, window.currentEntityPluralName, true);
+        if (window.location.hash === '#pf') {
+            return;
+        }
+
+        addMainCss();
     }
 
-    function resetCSS() {
+    function clearCss() {
         const head = document.getElementsByTagName('head')[0];
         head.innerHTML = '';
+    }
 
-        const css = `pre
+    function addMainCss() {
+        const css = `
+            pre
             .string { color: brown; }
             .number { color: darkgreen; }
             .boolean { color: blue; }
@@ -1605,53 +1647,53 @@
             .link { color: blue; }
             .primarykey { color: tomato; }
 
-            input {
+            .panel input {
                 width: 300px;
                 margin: 0 0 0 8px;
             }
 
-            textarea {
+            .panel textarea {
                 width: 400px;
                 margin: 0 0 0 20px;
             }
 
-            select {
+            .panel select {
                 margin: 0 0 0 8px;
             }
 
-            span:not(.lookupField):not(.lookupEdit):not(.link) {
+            .panel span:not(.lookupField):not(.lookupEdit):not(.link) {
                 margin-right: 24px;
                 padding-right: 16px;
             }
 
-            option:empty {
+            .panel option:empty {
                 display:none;
             }
 
-            .copyButton {
+            .panel .copyButton {
                 color:dimgray;
                 display: none;
             }           
             
-            .field:hover .copyButton {
+            .panel .field:hover .copyButton {
                 display: unset;
             }
 
-            .copyButton:field {
+            .panel .copyButton:field {
                 color: black;
                 cursor: pointer;
             }
 
-            .copyButton:active {
+            .panel .copyButton:active {
                 color: green;
             }             
 
-            .link {
+            .panel .link {
                 margin:0;
                 padding:0;
             }
 
-            table {
+            .panel table {
                 color: black;
                 margin-left: 26px;
                 border-collapse: collapse;
@@ -1660,24 +1702,58 @@
                 width: 98%;
             }
 
-            thead td {
+            .panel thead td {
                 font-weight: bold;
             }
 
-            td {
+            .panel td {
                 padding: 4px;
                 border: 1px solid;
                 overflow:auto;
             }
 
-            .impersonationIdFieldLabel {
+            .panel .impersonationIdFieldLabel {
                 padding:0px;
                 margin:0px;
             }
+
+            .bodyPreviewed {
+                display: inline-flex;
+                margin-top: 0px;
+                margin-bottom: 0px;
+            }
+
+            .prePreviewed {
+                width: 49vw;
+                overflow-x: scroll;
+                overflow-y: scroll;
+                height: 100%;
+                margin: 0px;
+            }
+                
+            .monacoContainer {
+                height: 94vh;
+                width: 98vw;
+                box-sizing: border-box;
+            }
+        
+            .monacoActions {
+                height: 2em;
+                display: flex;
+                align-items: center;
+                border-top: 1px solid #aaa;
+                padding: 0.2em;
+                box-sizing: border-box;
+            }
+        
+            .monacoLabel {
+                padding-right: 0.3em;
+            }    
             `
 
         addcss(css);
     }
 
+    clearCss();
     await makeItPretty();
 })()

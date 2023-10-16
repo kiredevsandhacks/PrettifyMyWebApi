@@ -7,6 +7,8 @@ async function handler(request, sender, sendResponse) {
       });
     } else if (request.action === 'openInWebApi' && tabs[0].id === sender.tab.id) {
       chrome.tabs.create({ url: request.url, active: true });
+    } else if (request.action === 'openFlowInWebApi' && tabs[0].id === sender.tab.id) {
+      chrome.tabs.create({ url: request.url, active: true });
     }
   });
 }
@@ -20,4 +22,3 @@ chrome.action.onClicked.addListener(async function (tab) {
     files: ['content.js']
   });
 });
-

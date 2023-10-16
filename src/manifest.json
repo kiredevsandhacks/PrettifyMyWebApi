@@ -1,7 +1,8 @@
 {
-    "name": "PrettifyMyWebApi for Dynamics/Power Platform",
-    "version": "1.0.3.0",
-    "description": "Press to impress your coworkers!",
+    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAszSlLUi96swWxL1PwsiJlvuZZIpc2awf/R7vkXIjwgK9lnSYKCL3UnGmCpMzoG4Dw6t0VSYf0tuuMcP5R1INObai35tvgCk8hOd86C4wtgwqGn0un9So3S3OyH2gf+zTcekxt4tvF5kj0Jz9BfMvFCcPZn4VUWEPwjxYgNUI1himzVwwGVP0nStcB7PlwtDWkZNHoKX2i2kl6pHA+SxOfjDk1KiZ0hu0yLD37wkEkLK5iavl4z1g5vrWd77LlzTckykLBybrXRKE1tczqKZcTn17oORhBgJfQ269JjnQfEPjyErHrpimJGSN+wmrl4ggrGHpFyfZs8m/H9LtWucc7wIDAQAB",
+    "name": "PrettifyMyWebApi for Microsoft Dataverse",
+    "version": "1.0.4.0",
+    "description": "Open any record in the Dataverse Web Api and supercharge the output. Press to impress your coworkers!",
     "manifest_version": 3,
     "author": "Erik Donker",
     "background": {
@@ -12,12 +13,16 @@
         "activeTab",
         "scripting"
     ],
-    "web_accessible_resources": [        {
+    "web_accessible_resources": [
+        {
             "resources": [
-                "eventHandler.js"
+                "eventHandler.js",
+                "monaco/*"
             ],
             "matches": [
-                "*://*.dynamics.com/*"
+                "*://*.dynamics.com/*",
+                "*://*.powerautomate.com/*",
+                "*://*.powerapps.com/*"
             ]
         }
     ],

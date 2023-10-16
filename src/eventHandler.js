@@ -35,5 +35,13 @@
     } else if (/\/api\/data\/v[0-9][0-9]?.[0-9]\//.test(window.location.pathname)) {
         window.location.hash = 'p';
         window.postMessage({ action: "prettifyWebApi" });
+    } else if (location.href.indexOf("/flows/") != -1 && location.href.indexOf("/solutions/") != -1) {
+        let dataverseUrl = JSON.parse(localStorage.getItem("powerautomate-lastEnvironment"))?.value?.properties?.linkedEnvironmentMetadata?.instanceUrl;
+        let flowUniqueId = location.href.split("/flows/").pop().split("?")[0].split("/")[0];
+
+        if (dataverseUrl && flowUniqueId) {
+            let url = dataverseUrl + "api/data/v9.2/workflows?$filter=resourceid eq " + flowUniqueId + " or workflowidunique eq " + flowUniqueId + "#pf"
+            window.postMessage({ action: "openFlowInWebApi", url: url });
+        }
     }
 })()

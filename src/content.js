@@ -4,7 +4,7 @@ scriptTag.type = "text/javascript";
 
 document.head.appendChild(scriptTag);
 
-function handler(event) {
+function prettifyWebApiHandler(event) {
     if (event.origin === window.origin) {
         if (event.data.action === 'prettifyWebApi') {
             chrome.runtime.sendMessage({ action: "prettifyWebApi" });
@@ -12,12 +12,16 @@ function handler(event) {
             if (event.data.url.startsWith('https://')) {
                 chrome.runtime.sendMessage({ action: "openInWebApi", url: event.data.url });
             }
+        } else if (event.data.action === 'openFlowInWebApi') {
+            if (event.data.url.startsWith('https://')) {
+                chrome.runtime.sendMessage({ action: "openFlowInWebApi", url: event.data.url });
+            }
         }
     }
 }
 
 if (!window.initialized) {
-    window.addEventListener('message', handler);
+    window.addEventListener('message', prettifyWebApiHandler);
 }
 
 window.initialized = true;
