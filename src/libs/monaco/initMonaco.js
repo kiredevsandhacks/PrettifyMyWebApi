@@ -235,7 +235,6 @@
             selection = selection.replaceAll("'", '').replaceAll('"', '');
 
             const newName = prompt('Please enter a new name for : ' + selection, selection);
-            debugger
             if (newName != null && newName !== '') {
                 const currentValue = getEditorValue();
                 const newValue = currentValue.replaceAll(`'${selection}'`, `'${newName}'`).replaceAll(`"${selection}"`, `"${newName}"`);
