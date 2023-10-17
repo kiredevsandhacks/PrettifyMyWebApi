@@ -1374,14 +1374,14 @@
 
         const result = await retrieveLogicalNameFromPluralNameAsync(pluralName);
 
-        let singleRecordId = '';
-
         if (window.location.hash === '#pf' && jsonObj.value.length === 1) {
             const recordId = jsonObj.value[0][result.primaryIdAttribute];
             const newUrl = apiUrl + pluralName + "(" + recordId + ")#p";
             window.location.href = newUrl;
             return;
         }
+
+        let singleRecordId = '';
 
         // sdk messages other than retrieve or retrievemultiple
         if (!result.logicalName) {
@@ -1641,7 +1641,7 @@
         window.currentEntityPluralName = window.location.pathname.split('/').pop().split('(').shift();
 
         await prettifyWebApi(response, document.body, window.currentEntityPluralName, false);
-
+        
         if (window.location.hash === '#pf') {
             return;
         }

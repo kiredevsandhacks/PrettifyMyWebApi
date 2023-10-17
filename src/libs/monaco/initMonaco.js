@@ -41,11 +41,6 @@
 
     mainPanel.prepend(btn);
 
-    document.getElementById("prettifyJsonButton").onclick = () => {
-        setRegularEditorValue(prettifyJsonString(regularEditor.getValue()));
-        setDiffEditorValue(prettifyJsonString(diffEditor.getModel().modified.getValue()));
-    };
-
     let regularEditor = null;
     let diffEditor = null;
 
@@ -178,6 +173,18 @@
             }
         });
 
+        document.getElementById("prettifyJsonButton").onclick = () => {
+            if (editMode === 'regular') {
+                regularEditor.getAction("editor.action.formatDocument").run();;
+            } else if (editMode === 'diff') {
+                diffEditor.getModifiedEditor().getAction('editor.action.formatDocument').run()
+            } else {
+                const err = 'Invalid editmode. Should not happen.';
+                alert(err);
+                throw err;
+            }
+        };
+
         btn.style.display = null;
         btn.onclick = async () => {
             container.style.display = null;
@@ -220,16 +227,36 @@
                 throw err;
             }
 
-            
+            if (selection == null || selection === '') {
+                alert('To use this method, first select the action or variable name to replace in the editor.');
+                return;
+            }
 
-            prompt('Please enter a new name for : ' + selection, selection);
+            selection = selection.replaceAll("'", '').replaceAll('"', '');
+
+            const newName = prompt('Please enter a new name for : ' + selection, selection);
+            debugger
+            if (newName != null && newName !== '') {
+                const currentValue = getEditorValue();
+                const newValue = currentValue.replaceAll(`'${selection}'`, `'${newName}'`).replaceAll(`"${selection}"`, `"${newName}"`);
+
+                if (editMode === 'regular') {
+                    setRegularEditorValue(newValue);
+                } else if (editMode === 'diff') {
+                    setDiffEditorValue(newValue);
+                } else {
+                    const err = 'Invalid editmode. Should not happen.';
+                    alert(err);
+                    throw err;
+                }
+            }
         }
 
         document.getElementById('renameTextButton').onclick = async () => {
             if (editMode === 'regular') {
-                regularEditor.getAction("actions.find").run();;
+                regularEditor.getAction('editor.action.startFindReplaceAction').run();;
             } else if (editMode === 'diff') {
-                diffEditor.getModifiedEditor().getAction('actions.find').run()
+                diffEditor.getModifiedEditor().getAction('editor.action.startFindReplaceAction').run()
             } else {
                 const err = 'Invalid editmode. Should not happen.';
                 alert(err);
