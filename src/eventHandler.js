@@ -36,7 +36,7 @@
         window.location.hash = 'p';
         window.postMessage({ action: "prettifyWebApi" });
     }
-    else if (location.href.indexOf("flows/") != -1 && location.href.indexOf("/solutions/") != -1) {
+    else if (location.href.indexOf("flows/") != -1) {
         // it can be /cloudflows/ or /flows/
         let dataverseUrl = JSON.parse(localStorage.getItem("powerautomate-lastEnvironment"))?.value?.properties?.linkedEnvironmentMetadata?.instanceUrl;
         let flowUniqueId = location.href.split("flows/").pop().split("?")[0].split("/")[0];

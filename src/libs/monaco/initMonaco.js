@@ -14,11 +14,13 @@
                 
 <div class="monacoActions">
   <label class="monacoLabel" id="monacoLabel" style="cursor:pointer;">Show differences</label>
-  <input type="checkbox" style="width:unset;cursor:pointer;" class="showDifferenceInput" id="showDifferenceInput">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <button id="prettifyJsonButton" style="cursor:pointer;">Prettify JSON</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <button id="backupFlowButton" style="cursor:pointer;">Create backup</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <button id="saveFlowButton" style="cursor:pointer;">Save Flow</button>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <button id="cancelEditFlowButton" style="cursor:pointer;">Cancel edit</button>
+  <input type="checkbox" style="width:unset;cursor:pointer;" class="showDifferenceInput" id="showDifferenceInput">&nbsp;&nbsp;
+  <button id="prettifyJsonButton" style="cursor:pointer;">Prettify JSON</button>&nbsp;&nbsp;
+  <button id="renameThingsButton" style="cursor:pointer;">Rename variable/action</button>&nbsp;&nbsp;
+  <button id="renameTextButton" style="cursor:pointer;">Find & Replace</button>&nbsp;&nbsp;
+  <button id="backupFlowButton" style="cursor:pointer;">Create backup</button>&nbsp;&nbsp;
+  <button id="saveFlowButton" style="cursor:pointer;">Save Flow</button>&nbsp;&nbsp;
+  <button id="cancelEditFlowButton" style="cursor:pointer;">Close editor</button>
 </div>`;
 
     const btn = document.createElement('button');
@@ -57,6 +59,8 @@
             language: "json",
             automaticLayout: true,
         });
+
+        window.regularEditor = regularEditor;
     }
 
     function setRegularEditorValue(value) {
@@ -72,6 +76,8 @@
             original: monaco.editor.createModel(original, 'json'),
             modified: monaco.editor.createModel(original, 'json'),
         });
+
+        window.diffEditor = diffEditor;
     }
 
     function setDiffEditorValue(modified) {
@@ -138,7 +144,7 @@
     let editMode = 'regular';
     let originalValue = JSON.stringify(JSON.parse(mainPanel.dataset.clientdata), null, 2);
 
-    require.config({ paths: { vs: chromeRuntimeUrl + 'monaco' } });
+    require.config({ paths: { vs: chromeRuntimeUrl + 'libs/monaco' } });
 
     require(['vs/editor/editor.main'], function () {
         monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
@@ -200,6 +206,35 @@
 
         document.getElementById('cancelEditFlowButton').onclick = async () => {
             window.location.reload();
+        }
+
+        document.getElementById('renameThingsButton').onclick = async () => {
+            let selection = '';
+            if (editMode === 'regular') {
+                selection = regularEditor.getModel().getValueInRange(regularEditor.getSelection())
+            } else if (editMode === 'diff') {
+                selection = diffEditor.getModifiedEditor().getModel().getValueInRange(diffEditor.getModifiedEditor().getSelection());
+            } else {
+                const err = 'Invalid editmode. Should not happen.';
+                alert(err);
+                throw err;
+            }
+
+            
+
+            prompt('Please enter a new name for : ' + selection, selection);
+        }
+
+        document.getElementById('renameTextButton').onclick = async () => {
+            if (editMode === 'regular') {
+                regularEditor.getAction("actions.find").run();;
+            } else if (editMode === 'diff') {
+                diffEditor.getModifiedEditor().getAction('actions.find').run()
+            } else {
+                const err = 'Invalid editmode. Should not happen.';
+                alert(err);
+                throw err;
+            }
         }
     });
 })()

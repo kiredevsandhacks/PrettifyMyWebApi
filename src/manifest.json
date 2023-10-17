@@ -17,7 +17,7 @@
         {
             "resources": [
                 "eventHandler.js",
-                "monaco/*"
+                "libs/*"
             ],
             "matches": [
                 "*://*.dynamics.com/*",

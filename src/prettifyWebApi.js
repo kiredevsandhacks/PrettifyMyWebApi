@@ -15,6 +15,7 @@
 </svg>`.replaceAll(',', replacedComma); // need to 'escape' the commas because they cause issues with the JSON string cleanup code 
 
     let apiUrl = '';
+    let titleSet = false;
 
     try {
         apiUrl = /\/api\/data\/v[0-9][0-9]?.[0-9]\//.exec(window.location.pathname)[0];
@@ -1061,7 +1062,7 @@
                     createLookupInput(container, targets);
                 }
             } else if (attributeType === 'DateTime') {
-                // todo
+                createInput(container, false, 'datetime');
             } else if (attributeType === 'Uniqueidentifier') {
                 // can't change this
             } else if (attributeType === 'State') {
@@ -1232,6 +1233,16 @@
                     // skip if not action is required
                     continue;
                 }
+            } else if (dataType === 'datetime') {
+                if (inputValue === '') {
+                    value = null;
+                } else {
+                    if (Date.parse(value) === NaN) {
+                        alert('Error for datetime field: ' + fieldName + '. The value ' + value + ' is not a valid datetime.');
+                        return;
+                    }
+                    value = inputValue;
+                }
             }
 
 
@@ -1345,13 +1356,13 @@
         mainPanel.dataset.apiUrl = apiUrl;
 
         let scriptTag = document.createElement('script');
-        scriptTag.src = chrome.runtime.getURL('monaco/loader.js');
+        scriptTag.src = chrome.runtime.getURL('libs/monaco/loader.js');
         scriptTag.type = "text/javascript";
         document.head.appendChild(scriptTag);
 
         window.setTimeout(() => {
             let scriptTagInit = document.createElement('script');
-            scriptTagInit.src = chrome.runtime.getURL('monaco/initMonaco.js');
+            scriptTagInit.src = chrome.runtime.getURL('libs/monaco/initMonaco.js');
             scriptTagInit.type = "text/javascript";
             document.head.appendChild(scriptTagInit);
         }, 200);
@@ -1372,8 +1383,14 @@
             return;
         }
 
-        if (isMultiple) {
-            document.title = pluralName;
+        // sdk messages other than retrieve or retrievemultiple
+        if (!result.logicalName) {
+            jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1);
+        } else if (isMultiple) {
+            if (!titleSet) {
+                document.title = pluralName;
+                titleSet = true;
+            }
             const valueKeyWithCount = 'value (' + jsonObj.value.length + ' records)';
 
             jsonObj[valueKeyWithCount] = jsonObj.value;
@@ -1383,8 +1400,10 @@
                 jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2);
             }
         } else {
-            document.title = result.logicalName;
-
+            if (!titleSet) {
+                document.title = result.logicalName;
+                titleSet = true;
+            }
             if (!isPreview) {
                 window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
             }
@@ -1438,7 +1457,7 @@
         setCopyToClipboardHandlers();
         setLookupEditHandlers();
 
-        if (!isMultiple && isPreview) {
+        if (!isMultiple && !isPreview && result.logicalName != null) {
             setImpersonateUserHandlers();
         }
     }
