@@ -36,13 +36,19 @@
         window.location.hash = 'p';
         window.postMessage({ action: "prettifyWebApi" });
     }
-    else if (location.href.indexOf("flows/") != -1) {
+    else if (location.href.indexOf("flows/") != -1 && location.href.indexOf("/environments/") != -1) {
         // it can be /cloudflows/ or /flows/
-        let dataverseUrl = JSON.parse(localStorage.getItem("powerautomate-lastEnvironment"))?.value?.properties?.linkedEnvironmentMetadata?.instanceUrl;
+        let environments = JSON.parse(localStorage.getItem("powerautomate-environments"))?.value;
+
+        let currentEnvironmentId = location.href.split("/environments/").pop().split("?")[0].split("/")[0];
+
+        let currentEnvironment = environments.filter(e => e.name === currentEnvironmentId)[0];
+
+        let instanceUrl = currentEnvironment?.properties?.linkedEnvironmentMetadata?.instanceUrl;
         let flowUniqueId = location.href.split("flows/").pop().split("?")[0].split("/")[0];
 
-        if (dataverseUrl && flowUniqueId) {
-            let url = dataverseUrl + "api/data/v9.2/workflows?$filter=resourceid eq " + flowUniqueId + " or workflowidunique eq " + flowUniqueId + "#pf"
+        if (instanceUrl && flowUniqueId) {
+            let url = instanceUrl + "api/data/v9.2/workflows?$filter=resourceid eq " + flowUniqueId + " or workflowidunique eq " + flowUniqueId + "#pf"
             window.postMessage({ action: "openFlowInWebApi", url: url });
         } else {
             console.log("PrettifyMyWebApi: Couldn't find powerautomate-lastEnvironment in local storage.");
