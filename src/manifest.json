@@ -1,6 +1,6 @@
 {
     "name": "PrettifyMyWebApi for Microsoft Dataverse",
-    "version": "1.0.4.0",
+    "version": "1.0.4.1",
     "description": "Open any record in the Dataverse Web Api and supercharge the output. Press to impress your coworkers!",
     "manifest_version": 3,
     "author": "Erik Donker",
