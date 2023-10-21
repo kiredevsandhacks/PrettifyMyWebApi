@@ -18,14 +18,35 @@
             const result = await odataFetch(requestUrl)
             const pluralName = result.value[0].EntitySetName;
 
-            let recordId = Xrm.Page.data.entity.getId();
-            recordId = recordId.replace("{", "");
-            recordId = recordId.replace("}", "");
+            const recordId = Xrm.Page.data.entity.getId().replace("{", "").replace("}", "");
 
             const newLocation = window.location.origin + apiUrl + pluralName + "(" + recordId + ")";
             return newLocation;
         } catch (e) {
             alert("Error occurred: " + e.message);
+        }
+    }
+
+    function getDataverseUrl() {
+        const currentEnvironmentId = location.href.split("/environments/").pop().split("?")[0].split("/")[0];
+
+        for (let i = 0; i < localStorage.length; i++) {
+            const value = localStorage.getItem(localStorage.key(i));
+
+            try {
+                if (value.indexOf(currentEnvironmentId) === -1) {
+                    continue
+                }
+                const valueJson = JSON.parse(value);
+                if (Array.isArray(valueJson)) {
+                    const environment = valueJson.filter(v => v.name === currentEnvironmentId)[0];
+                    if (environment != null) {
+                        return environment?.properties?.linkedEnvironmentMetadata?.instanceUrl;
+                    }
+                }
+            } catch {
+                // ignore
+            }
         }
     }
 
@@ -36,22 +57,33 @@
         window.location.hash = 'p';
         window.postMessage({ action: "prettifyWebApi" });
     }
-    else if (location.href.indexOf("flows/") != -1 && location.href.indexOf("/environments/") != -1) {
-        // it can be /cloudflows/ or /flows/
-        let environments = JSON.parse(localStorage.getItem("powerautomate-environments"))?.value;
+    else if (window.location.host.endsWith(".powerautomate.com") || window.location.host.endsWith(".powerapps.com")) {
+        const hrefToCheck = location.href + "/"; // append a slash in case the url ends with '/flows' or '/cloudflows'
 
-        let currentEnvironmentId = location.href.split("/environments/").pop().split("?")[0].split("/")[0];
+        if (hrefToCheck.indexOf("flows/") === -1 || hrefToCheck.indexOf("/environments/") === -1) {
+            return;
+        }
 
-        let currentEnvironment = environments.filter(e => e.name === currentEnvironmentId)[0];
+        const instanceUrl = getDataverseUrl();
 
-        let instanceUrl = currentEnvironment?.properties?.linkedEnvironmentMetadata?.instanceUrl;
-        let flowUniqueId = location.href.split("flows/").pop().split("?")[0].split("/")[0];
+        if (!instanceUrl) {
+            console.warn("PrettifyMyWebApi: Couldn't find Dataverse instanceUrl.");
+            return;
+        }
 
-        if (instanceUrl && flowUniqueId) {
-            let url = instanceUrl + "api/data/v9.2/workflows?$filter=resourceid eq " + flowUniqueId + " or workflowidunique eq " + flowUniqueId + "#pf"
+        // it can be /cloudflows/ or /flows/ so just check for flows/
+        const flowUniqueId = hrefToCheck.split("flows/").pop().split("?")[0].split("/")[0];
+
+        if (flowUniqueId && flowUniqueId.length === 36) {
+            const url = instanceUrl + "api/data/v9.2/workflows?$filter=resourceid eq " + flowUniqueId + " or workflowidunique eq " + flowUniqueId + "#pf"
             window.postMessage({ action: "openFlowInWebApi", url: url });
         } else {
-            console.log("PrettifyMyWebApi: Couldn't find powerautomate-lastEnvironment in local storage.");
+            // for example, on make.powerapps it only works when viewing a flow from a solution
+            console.warn("PrettifyMyWebApi: Couldn't find Dataverse Flow Id.");
+
+            if (window.location.host.endsWith("make.powerapps.com") && hrefToCheck.indexOf("/solutions/") === -1) {
+                alert("Cannot find the Flow Id in the url. If you want to use this extension in make.powerapps.com, please open this Flow through a solution. Tip: if you use make.powerautomate.com, you should not run into this issue.");
+            }
         }
     }
 })()
