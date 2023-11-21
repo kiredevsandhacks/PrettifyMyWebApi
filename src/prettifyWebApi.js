@@ -18,7 +18,7 @@
     let titleSet = false;
 
     try {
-        apiUrl = /\/api\/data\/v[0-9][0-9]?.[0-9]\//.exec(window.location.pathname)[0];
+        apiUrl = /([\/a-zA-Z0-9]+)?\/api\/data\/v[0-9][0-9]?.[0-9]\//.exec(window.location.pathname)[0];
     } catch {
         alert('It seems you are not viewing a form or the dataverse odata web api. If you think this is an error, please contact the author of the extension and he will fix it asap.');
         return;
@@ -1641,7 +1641,7 @@
         window.currentEntityPluralName = window.location.pathname.split('/').pop().split('(').shift();
 
         await prettifyWebApi(response, document.body, window.currentEntityPluralName, false);
-        
+
         if (window.location.hash === '#pf') {
             return;
         }
@@ -1657,26 +1657,70 @@
     function addMainCss() {
         const css = `
             pre
-            .string { color: brown; }
+            .string { color: firebrick; }
             .number { color: darkgreen; }
             .boolean { color: blue; }
             .null { color: magenta; }
-            .guid { color: brown; }
+            .guid { color: firebrick; }
             .link { color: blue; }
             .primarykey { color: tomato; }
+
+            @media (prefers-color-scheme: dark) {
+              *:not(a) {
+                color: darkgray;
+              }
+
+              pre
+              .string { color: skyblue; }
+              .number { color: #5bd75b; }
+              .boolean { color: #5bd75b; }
+              .null { color: dimgray; }
+              .guid { color: skyblue; }
+              .link { color: lightblue; }
+              .primarykey { color: tomato; }
+              
+              body { 
+                background: #18181a;
+              }
+
+              a {
+                color: floralwhite;
+              }
+            }
 
             .panel input {
                 width: 300px;
                 margin: 0 0 0 8px;
             }
 
+            @media (prefers-color-scheme: dark) {
+                .panel input {
+                    background: #383A40;
+                    border-color: #18181a;
+                    height: 14px;
+                }    
+            }
+
+
             .panel textarea {
                 width: 400px;
                 margin: 0 0 0 20px;
             }
 
+            @media (prefers-color-scheme: dark) {
+                .panel textarea {
+                    background: #383A40;
+                }    
+            }
+
             .panel select {
                 margin: 0 0 0 8px;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .panel select {
+                    background: #383A40;
+                }  
             }
 
             .panel span:not(.lookupField):not(.lookupEdit):not(.link) {

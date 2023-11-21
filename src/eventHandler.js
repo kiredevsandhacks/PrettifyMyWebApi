@@ -11,7 +11,8 @@
             const version = versionArray[0] + '.' + versionArray[1];
 
             const entityLogicalName = Xrm.Page.data.entity.getEntityName();
-            const apiUrl = "/api/data/v" + version + "/";
+
+            const apiUrl = window.location.pathname.split("/").length <= 2 ? `/api/data/v${version}/` : `/${window.location.pathname.split("/")[1]}/api/data/v${version}/`
 
             const requestUrl = apiUrl + "EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq %27" + entityLogicalName + "%27)";
 
