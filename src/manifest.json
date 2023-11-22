@@ -19,9 +19,7 @@
                 "libs/*"
             ],
             "matches": [
-                "*://*.dynamics.com/*",
-                "*://*.powerautomate.com/*",
-                "*://*.powerapps.com/*"
+                "<all_urls>"
             ]
         }
     ],
