@@ -1332,7 +1332,11 @@
         });
 
         if (response.ok) {
-            await makeItPretty();
+            if (pluralName === 'workflows') {
+                window.location.reload(); // the monaco editor fails us when re-initializing, so just reload
+            } else {
+                await makeItPretty();
+            }
         } else {
             const errorText = await response.text();
             console.error(`${response.status} - ${errorText}`);
@@ -1366,7 +1370,6 @@
             scriptTagInit.type = "text/javascript";
             document.head.appendChild(scriptTagInit);
         }, 200);
-
     }
 
     async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview) {
@@ -1651,10 +1654,15 @@
 
     function clearCss() {
         const head = document.getElementsByTagName('head')[0];
-        head.innerHTML = '';
+        const styles = head.getElementsByTagName('style');
+        for (let style of styles) {
+            head.removeChild(style);
+        }
     }
 
     function addMainCss() {
+        clearCss();
+
         const css = `
             pre
             .string { color: firebrick; }
@@ -1666,7 +1674,7 @@
             .primarykey { color: tomato; }
 
             @media (prefers-color-scheme: dark) {
-              *:not(a) {
+              *:not(svg, .copyButton, path) {
                 color: darkgray;
               }
 
@@ -1674,17 +1682,21 @@
               .string { color: skyblue; }
               .number { color: #5bd75b; }
               .boolean { color: #5bd75b; }
-              .null { color: dimgray; }
+              .null { color: #ae82eb; }
               .guid { color: skyblue; }
               .link { color: lightblue; }
               .primarykey { color: tomato; }
               
               body { 
-                background: #18181a;
+                background: #28282B;
               }
 
               a {
                 color: floralwhite;
+              }
+
+              button {
+                background: #131313;
               }
             }
 
@@ -1695,7 +1707,7 @@
 
             @media (prefers-color-scheme: dark) {
                 .panel input {
-                    background: #383A40;
+                    background: #131313;
                     border-color: #18181a;
                     height: 14px;
                 }    
@@ -1709,7 +1721,7 @@
 
             @media (prefers-color-scheme: dark) {
                 .panel textarea {
-                    background: #383A40;
+                    background: #131313;
                 }    
             }
 
@@ -1719,7 +1731,7 @@
 
             @media (prefers-color-scheme: dark) {
                 .panel select {
-                    background: #383A40;
+                    background: #131313;
                 }  
             }
 
@@ -1735,20 +1747,26 @@
             .panel .copyButton {
                 color:dimgray;
                 display: none;
+                cursor: pointer;
             }           
             
             .panel .field:hover .copyButton {
                 display: unset;
             }
 
-            .panel .copyButton:field {
-                color: black;
-                cursor: pointer;
-            }
-
             .panel .copyButton:active {
-                color: green;
+                color: darkgreen;
             }             
+
+            @media (prefers-color-scheme: dark) {
+                .panel .copyButton:active {
+                    color: #5bd75b;
+                }
+
+                .panel .copyButton {
+                    color:darkgray;
+                }       
+            }
 
             .panel .link {
                 margin:0;
@@ -1816,6 +1834,5 @@
         addcss(css);
     }
 
-    clearCss();
     await makeItPretty();
 })()

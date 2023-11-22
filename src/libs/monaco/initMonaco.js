@@ -5,7 +5,7 @@
 
     const container = document.createElement('section');
     container.style.display = 'none';
-    container.classList.add("monacoContainer");
+    container.classList.add('monacoContainer');
     body.appendChild(container);
 
     container.innerHTML = `
@@ -43,16 +43,16 @@
 
     let regularEditor = null;
     let diffEditor = null;
-
-    function prettifyJsonString(json) {
-        return JSON.stringify(JSON.parse(json), null, 2);
-    }
+    
 
     function createRegularEditor(value) {
-        regularEditor = monaco.editor.create(document.getElementById("regularEditorContainer"), {
+        const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'vs-dark' : 'vs'; 
+
+        regularEditor = monaco.editor.create(document.getElementById('regularEditorContainer'), {
             value: value,
-            language: "json",
+            language: 'json',
             automaticLayout: true,
+            theme: theme
         });
 
         window.regularEditor = regularEditor;
@@ -63,9 +63,12 @@
     }
 
     function createDiffEditor(original) {
+        const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'vs-dark' : 'vs'; 
+
         diffEditor = monaco.editor.createDiffEditor(document.getElementById('diffEditorContainer'), {
             automaticLayout: true,
-            renderSideBySide: true
+            renderSideBySide: true,
+            theme: theme
         });
         diffEditor.setModel({
             original: monaco.editor.createModel(original, 'json'),
@@ -173,7 +176,7 @@
             }
         });
 
-        document.getElementById("prettifyJsonButton").onclick = () => {
+        document.getElementById('prettifyJsonButton').onclick = () => {
             if (editMode === 'regular') {
                 regularEditor.getAction("editor.action.formatDocument").run();;
             } else if (editMode === 'diff') {
@@ -212,6 +215,8 @@
         }
 
         document.getElementById('cancelEditFlowButton').onclick = async () => {
+            // monaco throws up when re-initializing so just reload
+            // also, reloading makes sure we don't end up with invalid clientdata or anything
             window.location.reload();
         }
 
