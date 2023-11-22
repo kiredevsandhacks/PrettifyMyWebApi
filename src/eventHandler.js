@@ -55,7 +55,9 @@
         const newLocation = await getWebApiUrl() + '#p';
         window.postMessage({ action: 'openInWebApi', url: newLocation });
     } else if (/\/api\/data\/v[0-9][0-9]?.[0-9]\//.test(window.location.pathname)) {
-        if (window.location.hash === '#p') {
+        // the host check is for supporting on-prem, where we always want to resort to the postmessage based flow
+        // we only need total reload on the workflows table when viewing a single record, because of the monaco editor
+        if (window.location.hash === '#p' && /\/api\/data\/v[0-9][0-9]?.[0-9]\/workflows\(/.test(window.location.pathname) && window.location.host.endsWith(".dynamics.com")) {
             window.location.reload();
         } else {
             window.location.hash = 'p';

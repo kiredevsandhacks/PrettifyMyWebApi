@@ -1674,8 +1674,8 @@
             .primarykey { color: tomato; }
 
             @media (prefers-color-scheme: dark) {
-              *:not(svg, .copyButton, path) {
-                color: darkgray;
+              *:not(svg, .copyButton, path, a) {
+                color: #d3d3d3f2;
               }
 
               pre
