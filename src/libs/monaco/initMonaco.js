@@ -43,10 +43,10 @@
 
     let regularEditor = null;
     let diffEditor = null;
-    
+
 
     function createRegularEditor(value) {
-        const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'vs-dark' : 'vs'; 
+        const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'vs-dark' : 'vs';
 
         regularEditor = monaco.editor.create(document.getElementById('regularEditorContainer'), {
             value: value,
@@ -63,7 +63,7 @@
     }
 
     function createDiffEditor(original) {
-        const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'vs-dark' : 'vs'; 
+        const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'vs-dark' : 'vs';
 
         diffEditor = monaco.editor.createDiffEditor(document.getElementById('diffEditorContainer'), {
             automaticLayout: true,
@@ -112,6 +112,12 @@
     }
 
     async function commitSave(text) {
+        const saveFlowButton = document.getElementById('saveFlowButton');
+        let originalInnerText = saveFlowButton.innerText;
+
+        saveFlowButton.disabled = true;
+        saveFlowButton.innerText = 'Saving...';
+
         const requestUrl = mainPanel.dataset.apiUrl + 'workflows(' + mainPanel.dataset.recordId + ')';
 
         let headers = {
@@ -137,6 +143,9 @@
             console.error(`${response.status} - ${errorText}`);
             window.alert(`${response.status} - ${errorText}`);
         }
+
+        saveFlowButton.disabled = false;
+        saveFlowButton.innerText = originalInnerText;
     }
 
     let editMode = 'regular';
