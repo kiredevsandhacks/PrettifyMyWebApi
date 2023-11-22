@@ -284,7 +284,8 @@
     </div><div>    Impersonate another user<input class='impersonateAnotherUserCheckbox' type='checkbox' style='width:25px;'>
     </div><div class='impersonateDiv' style='display:none;'><div>      Base impersonation on this field: <select  class='impersonateAnotherUserSelect'><option value='systemuserid'>systemuserid</option><option value='azureactivedirectoryobjectid'>azureactivedirectoryobjectid</option></select>  <i><a href='https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user' target='_blank'>What's this?</a></i>
     </div><div>      <span class='impersonationIdFieldLabel'>systemuserid:</span><input class='impersonateAnotherUserInput' placeholder='00000000-0000-0000-0000-000000000000'>  <span class='impersonateUserPreview'></span>
-    </div></div><div><div id='previewChangesDiv'></div>    <a class='submitLink' style='display: none;' href='javascript:'>Save</a>
+    </div></div><div><div id='previewChangesDiv'></div>    <a class='cancelLink' href='javascript:'>Cancel</a><br/>    <a class='submitLink' style='display: none;' href='javascript:'>Save</a>
+    <div class='saveInProgressDiv' style='display:none;' >    Saving...</div>
     </div>
 </div>`.replaceAll('\n', '');
     }
@@ -1084,9 +1085,16 @@
         const editMenuDiv = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('editMenuDiv')[0];
         editMenuDiv.style.display = 'inline';
 
+        const cancelLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('cancelLink')[0];
+        cancelLink.onclick = function () {
+            reloadPage(pluralName);
+        }
+
         const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
         submitLink.style.display = null;
         submitLink.onclick = async function () {
+            cancelLink.style.display = 'none';
+            submitLink.style.display = 'none';
             await submitEdit(pluralName, id);
         }
 
@@ -1325,6 +1333,9 @@
             headers['MSCRM.BypassCustomPluginExecution'] = true;
         }
 
+        const saveInProgressDiv = document.getElementsByClassName('saveInProgressDiv')[0];
+        saveInProgressDiv.style.display = null;
+
         const response = await fetch(requestUrl, {
             method: 'PATCH',
             headers: headers,
@@ -1332,15 +1343,21 @@
         });
 
         if (response.ok) {
-            if (pluralName === 'workflows') {
-                window.location.reload(); // the monaco editor fails us when re-initializing, so just reload
-            } else {
-                await makeItPretty();
-            }
+            reloadPage(pluralName);
         } else {
             const errorText = await response.text();
             console.error(`${response.status} - ${errorText}`);
             window.alert(`${response.status} - ${errorText}`);
+
+            saveInProgressDiv.style.display = 'none';
+        }
+    }
+
+    async function reloadPage(pluralName) {
+        if (pluralName === 'workflows') {
+            window.location.reload(); // the monaco editor fails us when re-initializing, so just reload
+        } else {
+            await makeItPretty();
         }
     }
 
@@ -1507,7 +1524,7 @@
         undoAllLink.innerText = 'Cancel';
         undoAllLink.href = 'javascript:';
 
-        undoAllLink.onclick = makeItPretty;
+        undoAllLink.onclick = () => reloadPage(pluralName);
 
         editMenu.appendChild(undoAllLink);
 
@@ -1521,6 +1538,8 @@
 
         // create this callback so we enclose the values we need when saving
         const saveCallback = async function () {
+            submitChangesLink.style.display = 'none';
+            undoAllLink.style.display = 'none';
             await commitSave(pluralName, id, changedFields, impersonateHeader);
         }
 
