@@ -1713,7 +1713,7 @@
               }
 
               a {
-                color: floralwhite;
+                color: #E9E9E9;
               }
 
               button {
