@@ -1302,16 +1302,16 @@
         }
 
         const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
+        const cancelLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('cancelLink')[0];
 
         if (!!previewChangesBeforeSaving) {
             previewChanges(changedFields, pluralName, id, impersonateHeader);
-            submitLink.style.display = 'none';
         } else {
-            await commitSave(pluralName, id, changedFields, impersonateHeader);
+            await commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink);
         }
     }
 
-    async function commitSave(pluralName, id, changedFields, impersonateHeader) {
+    async function commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink) {
         const requestUrl = apiUrl + pluralName + '(' + id + ')';
 
         Object.keys(changedFields)
@@ -1350,6 +1350,8 @@
             window.alert(`${response.status} - ${errorText}`);
 
             saveInProgressDiv.style.display = 'none';
+            cancelLink.style.display = null;
+            submitLink.style.display = null;
         }
     }
 
@@ -1540,7 +1542,7 @@
         const saveCallback = async function () {
             submitChangesLink.style.display = 'none';
             undoAllLink.style.display = 'none';
-            await commitSave(pluralName, id, changedFields, impersonateHeader);
+            await commitSave(pluralName, id, changedFields, impersonateHeader, undoAllLink, submitChangesLink);
         }
 
         submitChangesLink.onclick = saveCallback;
