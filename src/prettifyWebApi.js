@@ -88,7 +88,7 @@
     }
 
     async function retrieveLogicalNameFromPluralNameAsync(pluralName) {
-        const requestUrl = apiUrl + "EntityDefinitions?$select=LogicalName,PrimaryIdAttribute&$filter=(EntitySetName eq '" + pluralName + "')";
+        const requestUrl = apiUrl + "EntityDefinitions?$select=LogicalName,PrimaryIdAttribute,PrimaryNameAttribute&$filter=(EntitySetName eq '" + pluralName + "')";
 
         const json = await odataFetch(requestUrl);
 
@@ -98,10 +98,12 @@
 
         const logicalName = json.value[0].LogicalName;
         const primaryIdAttribute = json.value[0].PrimaryIdAttribute;
+        const primaryNameAttribute = json.value[0].PrimaryNameAttribute;
 
         return {
             logicalName: logicalName,
-            primaryIdAttribute: primaryIdAttribute
+            primaryIdAttribute: primaryIdAttribute,
+            primaryNameAttribute: primaryNameAttribute
         };
     }
 
@@ -331,7 +333,7 @@
         return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
-    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel) {
+    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel, primaryNameAttribute) {
         const recordId = jsonObj[primaryIdAttribute]; // we need to get this value before parsing or else it will contain html
 
         const ordered = orderProperties(jsonObj);
@@ -425,8 +427,13 @@
                 ordered[key] = createdFormattedValueSpan(cls, value, key, ordered[key + formattedValueType]);
                 delete ordered[key + formattedValueType];
             } else {
-                if (key === primaryIdAttribute) {
+                if (logicalName !== 'solution' && key === 'solutionid') {
+                    ordered[key] = createFieldSpan(cls, value, key) + generateWebApiAnchor(value, 'solutions');
+                }
+                else if (key === primaryIdAttribute) {
                     ordered[key] = '<b>' + createSpan('primarykey', value) + '</b>';
+                } else if (key === primaryNameAttribute) {
+                    ordered[key] = '<b>' + createSpan('string', value) + '</b>';
                 } else {
                     ordered[key] = createFieldSpan(cls, value, key);
                 }
@@ -1407,7 +1414,7 @@
 
         // sdk messages other than retrieve or retrievemultiple
         if (!result.logicalName) {
-            jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1);
+            jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1, null);
         } else if (isMultiple) {
             if (!titleSet) {
                 document.title = pluralName;
@@ -1419,7 +1426,7 @@
             delete jsonObj.value;
 
             for (const key in jsonObj[valueKeyWithCount]) {
-                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2);
+                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2, result.primaryNameAttribute);
             }
         } else {
             if (!titleSet) {
@@ -1431,7 +1438,7 @@
             }
 
             singleRecordId = jsonObj[result.primaryIdAttribute];
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1);
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
@@ -1700,11 +1707,11 @@
               }
 
               pre
-              .string { color: skyblue; }
+              .string { color: #5cc3ed; }
               .number { color: #5bd75b; }
               .boolean { color: #5bd75b; }
               .null { color: #ae82eb; }
-              .guid { color: skyblue; }
+              .guid { color: #5cc3ed; }
               .link { color: lightblue; }
               .primarykey { color: tomato; }
               
