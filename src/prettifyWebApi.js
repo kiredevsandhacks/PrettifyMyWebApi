@@ -1662,7 +1662,23 @@
         return table;
     }
 
+    function checkIfJsonViewerEnabled() {
+        try {
+            if (navigator.userAgent.match(/edg/i)) {
+                return document.body.getAttribute('data-code-mirror') != null || document.getElementById('settings_button') != null || document.getElementById('code_folding') != null;
+            }
+        } catch {
+            // do nothing
+        }
+        return false;
+    }
+
     async function makeItPretty() {
+        if (checkIfJsonViewerEnabled()) {
+            document.body.innerText = 'It seems you have Edge JSON Viewer enabled. This extension is not compatible with Edge JSON Viewer. Navigate to edge://flags/#edge-json-viewer to disable.';
+            return;
+        }
+
         if (window.location.hash === '#pf') {
             document.body.innerText = 'Loading your flow...';
         }
