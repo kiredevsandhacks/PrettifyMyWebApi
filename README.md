@@ -1,4 +1,5 @@
-# PrettifyMyWebApi
+Open any record in the Dataverse Web Api and supercharge the output. Press to impress your coworkers!
+
 All of your records can be quickly viewed and edited! Even when fields are not available on any form. Quickly view and edit Power Automate Flow definitions.
 
 How to use:
