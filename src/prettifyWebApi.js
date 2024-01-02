@@ -433,7 +433,7 @@
                 else if (key === primaryIdAttribute) {
                     ordered[key] = '<b>' + createSpan('primarykey', value) + '</b>';
                 } else if (key === primaryNameAttribute) {
-                    ordered[key] = '<b>' + createSpan('string', value) + '</b>';
+                    ordered[key] = '<b>' + createFieldSpan(cls, value, key) + '</b>';
                 } else {
                     ordered[key] = createFieldSpan(cls, value, key);
                 }
