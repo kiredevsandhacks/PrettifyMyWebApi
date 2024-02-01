@@ -137,6 +137,22 @@
         return json.value;
     }
 
+    async function retrieveStateMetadata(logicalName) {
+        const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
+
+        const json = await odataFetch(requestUrl);
+
+        return json.value;
+    }
+
+    async function retrieveStatusMetadata(logicalName) {
+        const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
+
+        const json = await odataFetch(requestUrl);
+
+        return json.value;
+    }
+
     async function retrieveBooleanFieldMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
@@ -711,12 +727,20 @@
         setInputMetadata(input, container, datatype);
     }
 
-    function createOptionSetValueInput(container, optionSet) {
+    function createOptionSetValueInput(container, optionSet, nullable, editable, isStatus) {
         const value = window.originalResponseCopy[container.dataset.fieldname];
 
         const select = document.createElement('select');
 
-        let selectHtml = "<option value='null'>null</option>"; // empty option for clearing it
+        let selectHtml = "";
+
+        if (!editable) {
+            select.setAttribute('disabled', '');
+        }
+
+        if (nullable) {
+            selectHtml = "<option value='null'>null</option>"; // empty option for clearing it
+        }
 
         let cachedValue;
 
@@ -725,8 +749,13 @@
             if (value === option.Value) {
                 cachedValue = formattedOption;
             }
+
             // TODO: refactor the value attribute to contain the pure values, true/false/null
-            selectHtml += `<option value='${escapeHtml(formattedOption)}'>${escapeHtml(formattedOption)}</option>`;
+            if (option.State || option.State === 0) {
+                selectHtml += `<option data-state='${escapeHtml(option.State)}' value='${escapeHtml(formattedOption)}'>${escapeHtml(formattedOption)}</option>`;
+            } else {
+                selectHtml += `<option value='${escapeHtml(formattedOption)}'>${escapeHtml(formattedOption)}</option>`;
+            }
         });
 
         select.innerHTML = selectHtml;
@@ -736,6 +765,23 @@
         }
 
         setInputMetadata(select, container, 'option');
+
+        if (isStatus) {
+            select.onchange = (e) => {
+                const stateCodeField = document.querySelectorAll('.enabledInputField[data-fieldname="statecode"]')[0];
+                const currentStateCodeValue = stateCodeField.value.split(':')[0].replaceAll(' ', '');
+                const stateCodeValueNeeded = e.target.selectedOptions[0].dataset.state;
+
+                if (currentStateCodeValue !== stateCodeValueNeeded) {
+                    for (let option of stateCodeField.options) {
+                        if (option.value.split(':')[0].replaceAll(' ', '') === stateCodeValueNeeded) {
+                            stateCodeField.value = option.value;
+                            break;
+                        }
+                    }
+                }
+            };
+        }
     }
 
     function createBooleanInput(container, falseOption, trueOption) {
@@ -1025,6 +1071,9 @@
         const attributesMetadata = await retrieveUpdateableAttributes(logicalName);
 
         const optionSetMetadata = await retrieveOptionSetMetadata(logicalName);
+        const stateMetadata = await retrieveStateMetadata(logicalName);
+        const statusMetadata = await retrieveStatusMetadata(logicalName);
+
         const booleanMetadata = await retrieveBooleanFieldMetadata(logicalName);
 
         const inputContainers = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('inputContainer');
@@ -1046,7 +1095,19 @@
                 const fieldOptionSetMetadata = optionSetMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
                 if (fieldOptionSetMetadata) {
                     const fieldOptionset = fieldOptionSetMetadata.GlobalOptionSet || fieldOptionSetMetadata.OptionSet;
-                    createOptionSetValueInput(container, fieldOptionset.Options)
+                    createOptionSetValueInput(container, fieldOptionset.Options, true, true, false)
+                }
+            } else if (attributeType === 'State') {
+                const fieldStateMetadata = stateMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
+                if (fieldStateMetadata) {
+                    const fieldOptionset = fieldStateMetadata.GlobalOptionSet || fieldStateMetadata.OptionSet;
+                    createOptionSetValueInput(container, fieldOptionset.Options, false, false, false)
+                }
+            } else if (attributeType === 'Status') {
+                const fieldStatusMetadata = statusMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
+                if (fieldStatusMetadata) {
+                    const fieldOptionset = fieldStatusMetadata.GlobalOptionSet || fieldStatusMetadata.OptionSet;
+                    createOptionSetValueInput(container, fieldOptionset.Options, false, true, true)
                 }
             } else if (attributeType === 'Integer') {
                 createInput(container, false, 'int');
@@ -1073,10 +1134,6 @@
                 createInput(container, false, 'datetime');
             } else if (attributeType === 'Uniqueidentifier') {
                 // can't change this
-            } else if (attributeType === 'State') {
-                // difficult to implement
-            } else if (attributeType === 'Status') {
-                // difficult to implement
             } else if (attributeType === 'Virtual') {
                 // difficult to implement
             }
