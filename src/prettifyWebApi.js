@@ -137,6 +137,15 @@
         return json.value;
     }
 
+    async function retrieveMultiSelectOptionSetMetadata(logicalName) {
+        const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
+
+        const json = await odataFetch(requestUrl);
+
+        return json.value;
+    }
+
+
     async function retrieveStateMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
@@ -734,6 +743,71 @@
         setInputMetadata(input, container, datatype);
     }
 
+    function createMultiSelectOptionSetValueInput(container, optionSet) {
+        const values = window.originalResponseCopy[container.dataset.fieldname]?.split(',');
+
+        const multiSelectDivContainer = document.createElement('div');
+        const fakeSelect = document.createElement('select');
+        fakeSelect.innerHTML = `<select style='border:none;outline:none;'><option style='display:none;'></option></select>`;
+
+        const multiSelectDiv = document.createElement('div');
+        multiSelectDiv.classList.add('multiSelectDiv')
+        multiSelectDiv.style = 'display:none;'
+
+        let multiSelectDivHtml = '';
+
+        optionSet.forEach(function (option) {
+            const formattedOption = option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label;
+
+            var isSelected = values?.find(v => v === option.Value?.toString()) != null;
+
+            var checked = isSelected ? 'checked' : '';
+
+            multiSelectDivHtml += `<div class='multiSelectSubDiv'><input class='multiSelectInput' type='checkbox' ${checked} data-label='${escapeHtml(option.Label?.UserLocalizedLabel?.Label)}' data-value='${escapeHtml(option.Value)}'>${escapeHtml(formattedOption)}</div>`;
+        });
+
+        multiSelectDiv.innerHTML = multiSelectDivHtml;
+
+        multiSelectDivContainer.appendChild(fakeSelect);
+        multiSelectDivContainer.appendChild(multiSelectDiv);
+
+        fakeSelect.onclick = (e) => {
+            e.preventDefault();
+            fakeSelect.blur();
+            window.focus();
+
+            multiSelectDiv.style.display = 'unset';
+            transParentOverlay.style.display = 'unset';
+        };
+
+        var updateLabel = function () {
+            let selectLabel = '';
+            multiSelectDiv.querySelectorAll('input').forEach(input => {
+                if (input.checked) {
+                    if (selectLabel !== '') {
+                        selectLabel += ', ';
+                    }
+
+                    selectLabel += input.dataset.label;
+                }
+            })
+
+            if (selectLabel === '') {
+                selectLabel = '(no options selected)';
+            }
+
+            fakeSelect.options[0].innerText = selectLabel;
+        }
+
+        updateLabel();
+
+        multiSelectDiv.querySelectorAll('input').forEach(input => {
+            input.onchange = updateLabel;
+        });
+
+        setInputMetadata(multiSelectDivContainer, container, 'multiselectoption');
+    }
+
     function createOptionSetValueInput(container, optionSet, nullable, editable, isStatus) {
         const value = window.originalResponseCopy[container.dataset.fieldname];
 
@@ -752,7 +826,7 @@
         let cachedValue;
 
         optionSet.forEach(function (option) {
-            const formattedOption = option.Value + ' : ' + option.Label.UserLocalizedLabel.Label;
+            const formattedOption = option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label;
             if (value === option.Value) {
                 cachedValue = formattedOption;
             }
@@ -1072,12 +1146,13 @@
     async function editRecord(logicalName, pluralName, id) {
         const editLink = document.getElementsByClassName('editLink')[0];
         editLink.style.display = 'none';
-        
+
         await initEntityClientMetadataForCurrentRecord();
 
         const attributesMetadata = await retrieveUpdateableAttributes(logicalName);
 
         const optionSetMetadata = await retrieveOptionSetMetadata(logicalName);
+        const multiSelectOptionSetMetadata = await retrieveMultiSelectOptionSetMetadata(logicalName);
         const stateMetadata = await retrieveStateMetadata(logicalName);
         const statusMetadata = await retrieveStatusMetadata(logicalName);
 
@@ -1142,7 +1217,13 @@
             } else if (attributeType === 'Uniqueidentifier') {
                 // can't change this
             } else if (attributeType === 'Virtual') {
-                // difficult to implement
+                if (attribute.AttributeTypeName?.Value === 'MultiSelectPicklistType') {
+                    const fieldOptionSetMetadata = multiSelectOptionSetMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
+                    if (fieldOptionSetMetadata) {
+                        const fieldOptionset = fieldOptionSetMetadata.GlobalOptionSet || fieldOptionSetMetadata.OptionSet;
+                        createMultiSelectOptionSetValueInput(container, fieldOptionset.Options)
+                    }
+                }
             }
         }
 
@@ -1218,6 +1299,20 @@
                     value = null;
                 } else {
                     value = parseInt(inputValue.split(':')[0].replace(' ', ''));
+                }
+            } else if (dataType === 'multiselectoption') {
+                input.querySelectorAll('input').forEach(input => {
+                    if (input.checked) {
+                        if (value !== '') {
+                            value += ',';
+                        }
+
+                        value += input.dataset.value;
+                    }
+                })
+                // normalize to null if no options checked
+                if (value === '') {
+                    value = null;
                 }
             } else if (dataType === 'int') {
                 if (inputValue == null || inputValue === undefined || inputValue === '') {
@@ -1764,6 +1859,17 @@
         }
 
         addMainCss();
+
+        var transParentOverlay = document.createElement('div');
+        transParentOverlay.id = 'transParentOverlay';
+        transParentOverlay.style.display = 'none';
+        transParentOverlay.onclick = () => {
+            const multiSelectDivs = document.querySelectorAll('.multiSelectDiv');
+            multiSelectDivs.forEach(d => d.style.display = 'none');
+            transParentOverlay.style.display = 'none';
+        };
+
+        document.body.appendChild(transParentOverlay);
     }
 
     function clearCss() {
@@ -1778,178 +1884,216 @@
         clearCss();
 
         const css = `
-            pre
-            .string { color: firebrick; }
-            .number { color: darkgreen; }
-            .boolean { color: blue; }
-            .null { color: magenta; }
-            .guid { color: firebrick; }
-            .link { color: blue; }
-            .primarykey { color: tomato; }
+        .multiSelectInput {
+            width: auto !important;
+            margin: 4px 8px 4px 4px !important;
+        }
 
-            @media (prefers-color-scheme: dark) {
-              *:not(svg, .copyButton, path, a) {
-                color: #d3d3d3f2;
-              }
+        .multiSelectSubDiv {
+            background: white;
+            margin-left: 8px;
+            padding: 4px 12px 4px 4px;
+            display: flex;
+            align-items: center;
+            border: 1px;
+            border-style: solid;
+            color: black;
+        }
 
-              pre
-              .string { color: #5cc3ed; }
-              .number { color: #5bd75b; }
-              .boolean { color: #5bd75b; }
-              .null { color: #ae82eb; }
-              .guid { color: #5cc3ed; }
-              .link { color: lightblue; }
-              .primarykey { color: tomato; }
-              
-              body { 
-                background: #28282B;
-              }
+        .multiSelectDiv {
+            z-index: 40;
+            position: relative !important;
+            margin: 4px;
+        }
 
-              a {
-                color: #E9E9E9;
-              }
+        #transParentOverlay {
+            background-color:transparent;
+            position:fixed;
+            top:0;
+            left:0;
+            right:0;
+            bottom:0;
+            display:block;
+            z-index: 20;
+        }
+        
+        pre
+        .string { color: firebrick; }
+        .number { color: darkgreen; }
+        .boolean { color: blue; }
+        .null { color: magenta; }
+        .guid { color: firebrick; }
+        .link { color: blue; }
+        .primarykey { color: tomato; }
 
-              button {
-                background: #131313;
-              }
-            }
+        @media (prefers-color-scheme: dark) {
+          *:not(svg, .copyButton, path, a) {
+            color: #d3d3d3f2;
+          }
 
+          .multiSelectSubDiv {
+            background: #131313;
+            color: #d3d3d3f2;
+          }
+
+          pre
+          .string { color: #5cc3ed; }
+          .number { color: #5bd75b; }
+          .boolean { color: #5bd75b; }
+          .null { color: #ae82eb; }
+          .guid { color: #5cc3ed; }
+          .link { color: lightblue; }
+          .primarykey { color: tomato; }
+          
+          body { 
+            background: #28282B;
+          }
+
+          a {
+            color: #E9E9E9;
+          }
+
+          button {
+            background: #131313;
+          }
+        }
+
+        .panel input {
+            width: 300px;
+            margin: 0 0 0 8px;
+        }
+
+        @media (prefers-color-scheme: dark) {
             .panel input {
-                width: 300px;
-                margin: 0 0 0 8px;
-            }
-
-            @media (prefers-color-scheme: dark) {
-                .panel input {
-                    background: #131313;
-                    border-color: #18181a;
-                    height: 14px;
-                }    
-            }
+                background: #131313;
+                border-color: #18181a;
+                height: 14px;
+            }    
+        }
 
 
+        .panel textarea {
+            width: 400px;
+            margin: 0 0 0 20px;
+        }
+
+        @media (prefers-color-scheme: dark) {
             .panel textarea {
-                width: 400px;
-                margin: 0 0 0 20px;
-            }
+                background: #131313;
+            }    
+        }
 
-            @media (prefers-color-scheme: dark) {
-                .panel textarea {
-                    background: #131313;
-                }    
-            }
+        .panel select {
+            margin: 0 0 0 8px;
+        }
 
+        @media (prefers-color-scheme: dark) {
             .panel select {
-                margin: 0 0 0 8px;
-            }
+                background: #131313;
+            }  
+        }
 
-            @media (prefers-color-scheme: dark) {
-                .panel select {
-                    background: #131313;
-                }  
-            }
+        .panel span:not(.lookupField):not(.lookupEdit):not(.link) {
+            margin-right: 24px;
+            padding-right: 16px;
+        }
 
-            .panel span:not(.lookupField):not(.lookupEdit):not(.link) {
-                margin-right: 24px;
-                padding-right: 16px;
-            }
+        .panel option:empty {
+            display:none;
+        }
 
-            .panel option:empty {
-                display:none;
+        .panel .copyButton {
+            color:dimgray;
+            display: none;
+            cursor: pointer;
+        }           
+        
+        .panel .field:hover .copyButton {
+            display: unset;
+        }
+
+        .panel .copyButton:active {
+            color: darkgreen;
+        }             
+
+        @media (prefers-color-scheme: dark) {
+            .panel .copyButton:active {
+                color: #5bd75b;
             }
 
             .panel .copyButton {
-                color:dimgray;
-                display: none;
-                cursor: pointer;
-            }           
+                color:darkgray;
+            }       
+        }
+
+        .panel .link {
+            margin:0;
+            padding:0;
+        }
+
+        .panel table {
+            color: black;
+            margin-left: 26px;
+            border-collapse: collapse;
+            border: 1px solid black;
+            table-layout: fixed;
+            width: 98%;
+        }
+
+        .panel thead td {
+            font-weight: bold;
+        }
+
+        .panel td {
+            padding: 4px;
+            border: 1px solid;
+            overflow:auto;
+        }
+
+        .panel .impersonationIdFieldLabel {
+            padding:0px;
+            margin:0px;
+        }
+
+        .bodyPreviewed {
+            display: inline-flex;
+            margin-top: 0px;
+            margin-bottom: 0px;
+        }
+
+        .prePreviewed {
+            width: 49vw;
+            overflow-x: scroll;
+            overflow-y: scroll;
+            height: 100%;
+            margin: 0px;
+        }
             
-            .panel .field:hover .copyButton {
-                display: unset;
-            }
+        .monacoContainer {
+            height: 94vh;
+            width: 98vw;
+            box-sizing: border-box;
+        }
 
-            .panel .copyButton:active {
-                color: darkgreen;
-            }             
-
-            @media (prefers-color-scheme: dark) {
-                .panel .copyButton:active {
-                    color: #5bd75b;
-                }
-
-                .panel .copyButton {
-                    color:darkgray;
-                }       
-            }
-
-            .panel .link {
-                margin:0;
-                padding:0;
-            }
-
-            .panel table {
-                color: black;
-                margin-left: 26px;
-                border-collapse: collapse;
-                border: 1px solid black;
-                table-layout: fixed;
-                width: 98%;
-            }
-
-            .panel thead td {
-                font-weight: bold;
-            }
-
-            .panel td {
-                padding: 4px;
-                border: 1px solid;
-                overflow:auto;
-            }
-
-            .panel .impersonationIdFieldLabel {
-                padding:0px;
-                margin:0px;
-            }
-
-            .bodyPreviewed {
-                display: inline-flex;
-                margin-top: 0px;
-                margin-bottom: 0px;
-            }
-
-            .prePreviewed {
-                width: 49vw;
-                overflow-x: scroll;
-                overflow-y: scroll;
-                height: 100%;
-                margin: 0px;
-            }
-                
-            .monacoContainer {
-                height: 94vh;
-                width: 98vw;
-                box-sizing: border-box;
-            }
+        .monacoActions {
+            height: 2em;
+            display: flex;
+            align-items: center;
+            border-top: 1px solid #aaa;
+            padding: 0.2em;
+            box-sizing: border-box;
+        }
         
-            .monacoActions {
-                height: 2em;
-                display: flex;
-                align-items: center;
-                border-top: 1px solid #aaa;
-                padding: 0.2em;
-                box-sizing: border-box;
-            }
-        
-            .monacoLabel {
-                padding-right: 0.3em;
-            }
+        .monacoLabel {
+            padding-right: 0.3em;
+        }
 
-            .checkBoxDiv {
-                display: flex;
-                padding: 1px 0;
-                align-items: center;
-            }
-            `
+        .checkBoxDiv {
+            display: flex;
+            padding: 1px 0;
+            align-items: center;
+        }
+        `
 
         addcss(css);
     }
