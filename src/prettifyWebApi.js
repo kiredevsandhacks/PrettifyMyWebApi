@@ -298,6 +298,7 @@
 <a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Edit this record</a>     
 <div class='editMenuDiv' style='display: none;'>
     <div class='checkBoxDiv'>    Bypass Custom Plugin Execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'>
+    </div><div class='checkBoxDiv'>    Bypass Power Automate Flow Execution<input class='bypassFlowExecutionBox' type='checkbox' style='width:25px;'>
     </div><div class='checkBoxDiv'>    Preview changes before committing save<input class='previewChangesBeforeSavingBox' type='checkbox' style='width:25px;' checked='true'>
     </div><div class='checkBoxDiv'>    Impersonate another user<input class='impersonateAnotherUserCheckbox' type='checkbox' style='width:25px;'>
     </div><div class='impersonateDiv' style='display:none;'><div>      Base impersonation on this field: <select  class='impersonateAnotherUserSelect'><option value='systemuserid'>systemuserid</option><option value='azureactivedirectoryobjectid'>azureactivedirectoryobjectid</option></select>  <i><a href='https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user' target='_blank'>What's this?</a></i>
@@ -440,7 +441,13 @@
                 ordered[key] = createSpanForLookup('null', value) + createLookupEditField(null, null, key, null, null);
             }
             else if (keyHasFormattedValueAnnotation(key, ordered)) {
-                ordered[key] = createdFormattedValueSpan(cls, value, key, ordered[key + formattedValueType]);
+                let formattedValueValue = ordered[key + formattedValueType];
+
+                formattedValueValue = formattedValueValue.replaceAll(replacedQuote, ''); // to prevent malformed html and potential xss, disallow this string
+                formattedValueValue = formattedValueValue.replaceAll('"', replacedQuote);
+                formattedValueValue = formattedValueValue.replaceAll(',', replacedComma);
+
+                ordered[key] = createdFormattedValueSpan(cls, value, key, formattedValueValue);
                 delete ordered[key + formattedValueType];
             } else {
                 if (logicalName !== 'solution' && key === 'solutionid') {
@@ -1063,10 +1070,10 @@
     }
 
     async function editRecord(logicalName, pluralName, id) {
-        await initEntityClientMetadataForCurrentRecord();
-
         const editLink = document.getElementsByClassName('editLink')[0];
         editLink.style.display = 'none';
+        
+        await initEntityClientMetadataForCurrentRecord();
 
         const attributesMetadata = await retrieveUpdateableAttributes(logicalName);
 
@@ -1396,6 +1403,12 @@
         if (!!bypassCustomPluginExecution) {
             headers['MSCRM.BypassCustomPluginExecution'] = true;
         }
+
+        const bypassFlowExecution = document.getElementsByClassName('bypassFlowExecutionBox')[0].checked;
+        if (!!bypassFlowExecution) {
+            headers['MSCRM.SuppressCallbackRegistrationExpanderJob'] = true;
+        }
+
 
         const saveInProgressDiv = document.getElementsByClassName('saveInProgressDiv')[0];
         saveInProgressDiv.style.display = null;
