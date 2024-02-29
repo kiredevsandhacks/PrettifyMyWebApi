@@ -459,7 +459,7 @@
                 ordered[key] = createdFormattedValueSpan(cls, value, key, formattedValueValue);
                 delete ordered[key + formattedValueType];
             } else {
-                if (logicalName !== 'solution' && key === 'solutionid') {
+                if (logicalName !== 'solution' && key === 'solutionid' && value != null) {
                     ordered[key] = createFieldSpan(cls, value, key) + generateWebApiAnchor(value, 'solutions');
                 }
                 else if (key === primaryIdAttribute) {
