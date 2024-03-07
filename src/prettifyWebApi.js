@@ -11,8 +11,8 @@
     const replacedComma = '__~~__REPLACEDCOMMA__~~__';
 
     const clipBoardIcon = `<svg style='width:16px;position:absolute' viewBox='0 0 24 24'>
-    <path fill='currentColor' d='M19,3H14.82C14.25,1.44 12.53,0.64 11,1.2C10.14,1.5 9.5,2.16 9.18,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M12,3A1,1 0 0,1 13,4A1,1 0 0,1 12,5A1,1 0 0,1 11,4A1,1 0 0,1 12,3M7,7H17V5H19V19H5V5H7V7M17,11H7V9H17V11M15,15H7V13H15V15Z' />
-</svg>`.replaceAll(',', replacedComma); // need to 'escape' the commas because they cause issues with the JSON string cleanup code 
+        <path fill='currentColor' d='M19,3H14.82C14.25,1.44 12.53,0.64 11,1.2C10.14,1.5 9.5,2.16 9.18,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M12,3A1,1 0 0,1 13,4A1,1 0 0,1 12,5A1,1 0 0,1 11,4A1,1 0 0,1 12,3M7,7H17V5H19V19H5V5H7V7M17,11H7V9H17V11M15,15H7V13H15V15Z' />
+    </svg>`.replaceAll(',', replacedComma); // need to 'escape' the commas because they cause issues with the JSON string cleanup code 
 
     let apiUrl = '';
     let titleSet = false;
@@ -28,6 +28,10 @@
     const lazyLookupInitFunctions = {};
     const retrievedSearchableAttributes = {};
     const retrievedClientMetadataPerEntity = {};
+    const retrievedLogicalNamePluralNamePairs = {};
+
+    let retrievedCreatableAttributes = null;
+    let retrievedUpdateableAttributes = null;
 
     let allPluralNames = null;
 
@@ -87,7 +91,11 @@
         return primaryNameAndKey;
     }
 
-    async function retrieveLogicalNameFromPluralNameAsync(pluralName) {
+    async function retrieveLogicalAndPrimaryKeyAndPrimaryName(pluralName) {
+        if (retrievedLogicalNamePluralNamePairs.hasOwnProperty(pluralName)) {
+            return retrievedLogicalNamePluralNamePairs[pluralName];
+        }
+
         const requestUrl = apiUrl + "EntityDefinitions?$select=LogicalName,PrimaryIdAttribute,PrimaryNameAttribute&$filter=(EntitySetName eq '" + pluralName + "')";
 
         const json = await odataFetch(requestUrl);
@@ -100,11 +108,15 @@
         const primaryIdAttribute = json.value[0].PrimaryIdAttribute;
         const primaryNameAttribute = json.value[0].PrimaryNameAttribute;
 
-        return {
+        const result = {
             logicalName: logicalName,
             primaryIdAttribute: primaryIdAttribute,
             primaryNameAttribute: primaryNameAttribute
         };
+
+        retrievedLogicalNamePluralNamePairs[pluralName] = result;
+
+        return result;
     }
 
     async function retrieveSearchableAttributes(logicalName) {
@@ -122,9 +134,29 @@
     }
 
     async function retrieveUpdateableAttributes(logicalName) {
+        if (retrievedUpdateableAttributes != null) {
+            return retrievedUpdateableAttributes;
+        }
+
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForUpdate eq true";
 
         const json = await odataFetch(requestUrl);
+
+        retrievedUpdateableAttributes = json.value;
+
+        return json.value;
+    }
+
+    async function retrieveCreatableAttributes(logicalName) {
+        if (retrievedCreatableAttributes != null) {
+            return retrievedCreatableAttributes;
+        }
+
+        const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForCreate eq true";
+
+        const json = await odataFetch(requestUrl);
+
+        retrievedCreatableAttributes = json.value;
 
         return json.value;
     }
@@ -299,23 +331,34 @@
         return `<a class='previewLink' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Preview</a>`;
     }
 
-    async function generateEditAnchor(logicalName, guid) {
+    async function generateDeleteAnchor(logicalName, guid) {
         const pluralName = await retrievePluralName(logicalName);
         const formattedGuid = guid.replace('{', '').replace('}', '');
 
+        return `<a class='deleteLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Delete this row</a>`
+    }
+
+    async function generateEditMenu(logicalName, guid, isCreateMode) {
+        const pluralName = await retrievePluralName(logicalName);
+        let formattedGuid = guid?.replace('{', '')?.replace('}', '');
+
+        if (isCreateMode) {
+            formattedGuid = '{temp}'
+        }
+
         return `
-<a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Edit this record</a>     
-<div class='editMenuDiv' style='display: none;'>
-    <div class='checkBoxDiv'>    Bypass Custom Plugin Execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'>
-    </div><div class='checkBoxDiv'>    Bypass Power Automate Flow Execution<input class='bypassFlowExecutionBox' type='checkbox' style='width:25px;'>
-    </div><div class='checkBoxDiv'>    Preview changes before committing save<input class='previewChangesBeforeSavingBox' type='checkbox' style='width:25px;' checked='true'>
-    </div><div class='checkBoxDiv'>    Impersonate another user<input class='impersonateAnotherUserCheckbox' type='checkbox' style='width:25px;'>
-    </div><div class='impersonateDiv' style='display:none;'><div>      Base impersonation on this field: <select  class='impersonateAnotherUserSelect'><option value='systemuserid'>systemuserid</option><option value='azureactivedirectoryobjectid'>azureactivedirectoryobjectid</option></select>  <i><a href='https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user' target='_blank'>What's this?</a></i>
-    </div><div>      <span class='impersonationIdFieldLabel'>systemuserid:</span><input class='impersonateAnotherUserInput' placeholder='00000000-0000-0000-0000-000000000000'>  <span class='impersonateUserPreview'></span>
-    </div></div><div><div id='previewChangesDiv'></div>    <a class='cancelLink' href='javascript:'>Cancel</a><br/>    <a class='submitLink' style='display: none;' href='javascript:'>Save</a>
-    <div class='saveInProgressDiv' style='display:none;' >    Saving...</div>
-    </div>
-</div>`.replaceAll('\n', '');
+<a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Edit this row</a>     
+    <div class='editMenuDiv' style='display: none;'>
+        <div class='checkBoxDiv'>    Bypass Custom Plugin Execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'>
+        </div><div class='checkBoxDiv'>    Bypass Power Automate Flow Execution<input class='bypassFlowExecutionBox' type='checkbox' style='width:25px;'>
+        </div><div class='checkBoxDiv'>    Preview changes before committing save<input class='previewChangesBeforeSavingBox' type='checkbox' style='width:25px;' checked='true'>
+        </div><div class='checkBoxDiv'>    Impersonate another user<input class='impersonateAnotherUserCheckbox' type='checkbox' style='width:25px;'>
+        </div><div class='impersonateDiv' style='display:none;'><div>      Base impersonation on this field: <select  class='impersonateAnotherUserSelect'><option value='systemuserid'>systemuserid</option><option value='azureactivedirectoryobjectid'>azureactivedirectoryobjectid</option></select>  <i><a href='https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user' target='_blank'>What's this?</a></i>
+        </div><div>      <span class='impersonationIdFieldLabel'>systemuserid:</span><input class='impersonateAnotherUserInput' placeholder='00000000-0000-0000-0000-000000000000'>  <span class='impersonateUserPreview'></span>
+        </div></div><div><div id='previewChangesDiv'></div>    <a class='cancelLink' href='javascript:'>Cancel</a><br/>    <a class='submitLink' style='display: none;' href='javascript:'>Save</a>
+        <div class='saveInProgressDiv' style='display:none;' >    Saving...</div>
+        </div>
+    </div>`.replaceAll('\n', '');
     }
 
     function createSpan(cls, value) {
@@ -359,7 +402,7 @@
         return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
-    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel, primaryNameAttribute) {
+    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel, primaryNameAttribute, isCreateMode) {
         const recordId = jsonObj[primaryIdAttribute]; // we need to get this value before parsing or else it will contain html
 
         const ordered = orderProperties(jsonObj);
@@ -376,7 +419,7 @@
                     for (let nestedKey in value) {
                         let nestedValue = value[nestedKey];
 
-                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, null, true, nestedLevel + 1);
+                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, null, true, nestedLevel + 1, null, false);
                     }
                 }
                 else {
@@ -392,7 +435,7 @@
             }
 
             if (typeof (value) === 'object' && value != null) {
-                ordered[key] = await enrichObjectWithHtml(value, null, null, null, null, true, nestedLevel + 1);
+                ordered[key] = await enrichObjectWithHtml(value, null, null, null, null, true, nestedLevel + 1, null, false);
                 continue;
             }
 
@@ -478,14 +521,19 @@
                 newObj['Form Link'] = createLinkSpan('link', generateFormUrlAnchor(logicalName, recordId));
 
                 if (isSingleRecord) {
-                    newObj['Edit this record'] = createLinkSpan('link', await generateEditAnchor(logicalName, recordId));
+                    newObj['Edit this row'] = createLinkSpan('link', await generateEditMenu(logicalName, recordId, false));
                 } else {
                     newObj['Web Api Link'] = createLinkSpan('link', generateWebApiAnchor(recordId, pluralName));
                 }
-            } else if (logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
+                newObj['Delete this row'] = createLinkSpan('link', await generateDeleteAnchor(logicalName, recordId, isSingleRecord));
+            } else if (!isCreateMode && logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
                 newObj['Form Link'] = 'Could not generate link';
                 newObj['Web Api Link'] = 'Could not generate link';
             }
+        }
+
+        if (isCreateMode) {
+            newObj['Create new row'] = createLinkSpan('link', await generateEditMenu(logicalName, recordId, true));
         }
 
         const combinedJsonObj = Object.assign(newObj, ordered);
@@ -541,14 +589,27 @@
     function setEditLinkClickHandlers() {
         const editLinks = document.getElementsByClassName('editLink');
 
-        // TODO refactor .attributes to .dataset
         for (let editLink of editLinks) {
-            const logicalName = editLink.attributes['data-logicalName'].value;
-            const pluralName = editLink.attributes['data-pluralName'].value;
-            const id = editLink.attributes['data-guid'].value;
+            const logicalName = editLink.dataset.logicalname;
+            const pluralName = editLink.dataset.pluralname;
+            const id = editLink.dataset.guid;
 
             editLink.onclick = async function () {
-                await editRecord(logicalName, pluralName, id);
+                await editRecord(logicalName, pluralName, id, false);
+            }
+        }
+    }
+
+    function setDeleteLinkClickHandlers() {
+        const deleteLinks = document.getElementsByClassName('deleteLink');
+
+        for (let deleteLink of deleteLinks) {
+            const logicalName = deleteLink.dataset.logicalname;
+            const pluralName = deleteLink.dataset.pluralname;
+            const id = deleteLink.dataset.guid;
+
+            deleteLink.onclick = async function () {
+                await deleteRecord(logicalName, pluralName, id);
             }
         }
     }
@@ -1143,13 +1204,50 @@
         container.classList.add('containerEnabled');
     }
 
-    async function editRecord(logicalName, pluralName, id) {
+    async function deleteRecord(logicalName, pluralName, id) {
+        const deleteLink = document.getElementsByClassName('deleteLink')[0];
+        deleteLink.style.display = 'none';
+
+        if (confirm("Are you sure you want to delete this row?")) {
+            const requestUrl = apiUrl + pluralName + '(' + id + ')';
+            const result = await fetch(requestUrl, { method: 'DELETE' });
+
+            if (result.status === 204) {
+                if (confirm('Row was deleted. Click OK to close this page.')) {
+                    window.close();
+                }
+            } else {
+                const json = await result.json();
+
+                if (json.error) {
+                    alert(json.error.message);
+                    const deleteLink = document.getElementsByClassName('deleteLink')[0];
+                    deleteLink.style.display = 'unset';
+                }
+            }
+        }
+    }
+
+    async function editRecord(logicalName, pluralName, id, isCreateMode) {
         const editLink = document.getElementsByClassName('editLink')[0];
         editLink.style.display = 'none';
 
         await initEntityClientMetadataForCurrentRecord();
 
-        const attributesMetadata = await retrieveUpdateableAttributes(logicalName);
+        let attributesMetadata = null;
+        if (isCreateMode) {
+            attributesMetadata = await retrieveCreatableAttributes(logicalName);
+            let attributesMetadataForUpdate = await retrieveUpdateableAttributes(logicalName);
+
+            for (let attribute of attributesMetadataForUpdate) {
+                const attributePresent = attributesMetadata.find(a => a.LogicalName === attribute.LogicalName);
+                if (attributePresent == null) {
+                    attributesMetadata.push(attribute);
+                }
+            }
+        } else {
+            attributesMetadata = await retrieveUpdateableAttributes(logicalName);
+        }
 
         const optionSetMetadata = await retrieveOptionSetMetadata(logicalName);
         const multiSelectOptionSetMetadata = await retrieveMultiSelectOptionSetMetadata(logicalName);
@@ -1168,8 +1266,9 @@
                 continue;
             }
 
+            // TODO: partylist?
             const attributeType = attribute.AttributeType;
-            if (attributeType === 'String') {
+            if (attributeType === 'String' || attributeType === 'EntityName') {
                 createInput(container, false, 'string');
             } else if (attributeType === 'Memo') {
                 createInput(container, true, 'memo');
@@ -1215,7 +1314,7 @@
             } else if (attributeType === 'DateTime') {
                 createInput(container, false, 'datetime');
             } else if (attributeType === 'Uniqueidentifier') {
-                // can't change this
+                createInput(container, false, 'guid');
             } else if (attributeType === 'Virtual') {
                 if (attribute.AttributeTypeName?.Value === 'MultiSelectPicklistType') {
                     const fieldOptionSetMetadata = multiSelectOptionSetMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
@@ -1247,7 +1346,7 @@
         submitLink.onclick = async function () {
             cancelLink.style.display = 'none';
             submitLink.style.display = 'none';
-            await submitEdit(pluralName, id);
+            await submitEdit(pluralName, id, isCreateMode);
         }
 
         document.querySelectorAll('.field').forEach((el) => {
@@ -1271,7 +1370,20 @@
         });
     }
 
-    async function submitEdit(pluralName, id) {
+    function resetSubmitControls() {
+        const saveInProgressDiv = document.getElementsByClassName('saveInProgressDiv')[0];
+        const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
+        const cancelLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('cancelLink')[0];
+
+        saveInProgressDiv.style.display = 'none';
+        cancelLink.style.display = null;
+        submitLink.style.display = null;
+
+        destroyPreview();
+        enableAllInputs();
+    }
+
+    async function submitEdit(pluralName, id, isCreateMode) {
         const previewChangesBeforeSaving = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('previewChangesBeforeSavingBox')[0].checked;
 
         const changedFields = {};
@@ -1289,10 +1401,23 @@
                 } else {
                     value = inputValue;
                 }
-            } else if (dataType === 'option') {
+            } else if (dataType === 'guid') {
+                if (inputValue === '') {
+                    value = null;
+                } else {
+                    value = inputValue;
+                }
+                if (value != null && value.length != 32) {
+                    alert(fieldName + ' is a guid. It must be exactly 32 characters long.');
+                    resetSubmitControls();
+                    return;
+                }
+            }
+            else if (dataType === 'option') {
                 if (!inputValue) {
                     // the select needs to contain a value always, if not, an error happened
                     alert('there was an error parsing the field ' + fieldName);
+                    resetSubmitControls();
                     return;
                 }
                 if (inputValue === 'null') {
@@ -1321,11 +1446,13 @@
                     value = parseInt(inputValue);
                     if (isNaN(value)) {
                         alert(fieldName + ' is a whole number. The value ' + inputValue + ' is not compatible.');
+                        resetSubmitControls();
                         return;
                     }
 
                     if (/^-?\d+$/.test(inputValue) === false) {
                         alert(fieldName + ' is a whole number. The value ' + inputValue + ' is not compatible.');
+                        resetSubmitControls();
                         return;
                     }
                 }
@@ -1335,17 +1462,20 @@
                 } else {
                     if (inputValue.includes(',')) {
                         alert(`${fieldName} is a column of type '${dataType}' and contains a comma (,). Use a dot (.) as the separator.`);
+                        resetSubmitControls();
                         return;
                     }
 
                     value = parseFloat(inputValue);
                     if (isNaN(value)) {
                         alert(`${fieldName} is a column of type '${dataType}'. The value ${inputValue} is not compatible.`);
+                        resetSubmitControls();
                         return;
                     }
 
                     if (/^-?[0-9]\d*(\.\d+)?$/.test(inputValue) === false) {
                         alert(`${fieldName} is a column of type '${dataType}'. The value ${inputValue} is not compatible.`);
+                        resetSubmitControls();
                         return;
                     }
                 }
@@ -1353,6 +1483,7 @@
                 if (!inputValue) {
                     // the select needs to contain a value always, if not, an error happened
                     alert('there was an error parsing the field ' + fieldName);
+                    resetSubmitControls();
                     return;
                 }
                 if (inputValue === 'null') {
@@ -1365,6 +1496,7 @@
                         value = false;
                     } else {
                         alert('there was an error parsing the field ' + fieldName);
+                        resetSubmitControls();
                         return;
                     }
                 }
@@ -1384,6 +1516,7 @@
 
                 if (tableSelectValue == null || tableSelectValue === '') {
                     alert('Error for lookup field: ' + fieldName + '. No table was selected. This should not be possible.');
+                    resetSubmitControls();
                     return;
                 }
 
@@ -1394,11 +1527,13 @@
                 if (input.dataset.editmode === 'update') {
                     if (inputValue == null || inputValue === '') {
                         alert('Error for lookup field: ' + fieldName + '. The field was marked for update but it is empty. If you do not want to edit this field, hit "undo changes".');
+                        resetSubmitControls();
                         return;
                     }
 
                     if (inputValue.length !== 36) {
                         alert('Error for lookup field: ' + fieldName + '. The value ' + value + ' is not a valid guid.');
+                        resetSubmitControls();
                         return;
                     }
                 } else if (input.dataset.editmode === 'makenull') {
@@ -1413,6 +1548,7 @@
                 } else {
                     if (Date.parse(value) === NaN) {
                         alert('Error for datetime field: ' + fieldName + '. The value ' + value + ' is not a valid datetime.');
+                        resetSubmitControls();
                         return;
                     }
                     value = inputValue;
@@ -1449,11 +1585,13 @@
         if (!!impersonateAnotherUser) {
             if (impersonateAnotherUserInput == null || impersonateAnotherUserInput === '') {
                 alert('User impersonation was checked, but ' + impersonateAnotherUserField + ' is empty');
+                resetSubmitControls();
                 return;
             }
 
             if (impersonateAnotherUserInput?.length !== 36) {
                 alert('User impersonation input error: ' + impersonateAnotherUserInput + ' is not a valid guid.');
+                resetSubmitControls();
                 return;
             }
 
@@ -1463,6 +1601,7 @@
                 impersonateHeader['CallerObjectId'] = impersonateAnotherUserInput;
             } else {
                 alert('This should not happen. Wrong value in impersonateAnotherUserSelect: ' + impersonateAnotherUserField);
+                resetSubmitControls();
                 return;
             }
         }
@@ -1471,14 +1610,23 @@
         const cancelLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('cancelLink')[0];
 
         if (!!previewChangesBeforeSaving) {
-            previewChanges(changedFields, pluralName, id, impersonateHeader);
+            previewChanges(changedFields, pluralName, id, impersonateHeader, isCreateMode);
         } else {
-            await commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink);
+            await commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink, isCreateMode);
         }
     }
 
-    async function commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink) {
-        const requestUrl = apiUrl + pluralName + '(' + id + ')';
+    async function commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink, isCreateMode) {
+        let requestUrl = '';
+        let method = '';
+
+        if (isCreateMode) {
+            requestUrl = apiUrl + pluralName;
+            method = 'POST';
+        } else {
+            requestUrl = apiUrl + pluralName + '(' + id + ')';
+            method = 'PATCH';
+        }
 
         Object.keys(changedFields)
             .filter(key => key.includes('____lookupOverride'))
@@ -1489,8 +1637,14 @@
             'content-type': 'application/json',
             'OData-MaxVersion': '4.0',
             'OData-Version': '4.0',
-            'If-Match': '*'
         };
+
+        if (!isCreateMode) {
+            headers['If-Match'] = '*'
+        } else {
+            headers['Prefer'] = 'return=representation'
+
+        }
 
         headers = { ...headers, ...impersonateHeader }
 
@@ -1509,21 +1663,26 @@
         saveInProgressDiv.style.display = null;
 
         const response = await fetch(requestUrl, {
-            method: 'PATCH',
+            method: method,
             headers: headers,
             body: JSON.stringify(changedFields)
         });
 
         if (response.ok) {
-            reloadPage(pluralName);
+            if (isCreateMode) {
+                const json = await response.json();
+
+                const primaryIdAttribute = (await retrieveLogicalAndPrimaryKeyAndPrimaryName(pluralName)).primaryIdAttribute;
+                window.location.href = apiUrl + pluralName + '(' + json[primaryIdAttribute] + ')#p';
+            } else {
+                reloadPage(pluralName);
+            }
         } else {
             const errorText = await response.text();
             console.error(`${response.status} - ${errorText}`);
             window.alert(`${response.status} - ${errorText}`);
 
-            saveInProgressDiv.style.display = 'none';
-            cancelLink.style.display = null;
-            submitLink.style.display = null;
+            resetSubmitControls();
         }
     }
 
@@ -1563,10 +1722,10 @@
         }, 200);
     }
 
-    async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview) {
+    async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview, isCreateMode) {
         const isMultiple = (jsonObj.value && Array.isArray(jsonObj.value));
 
-        const result = await retrieveLogicalNameFromPluralNameAsync(pluralName);
+        const result = await retrieveLogicalAndPrimaryKeyAndPrimaryName(pluralName);
 
         if (window.location.hash === '#pf' && jsonObj.value.length === 1) {
             const recordId = jsonObj.value[0][result.primaryIdAttribute];
@@ -1579,7 +1738,7 @@
 
         // sdk messages other than retrieve or retrievemultiple
         if (!result.logicalName) {
-            jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1, null);
+            jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1, null, isCreateMode);
         } else if (isMultiple) {
             if (!titleSet) {
                 document.title = pluralName;
@@ -1591,7 +1750,7 @@
             delete jsonObj.value;
 
             for (const key in jsonObj[valueKeyWithCount]) {
-                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2, result.primaryNameAttribute);
+                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2, result.primaryNameAttribute, isCreateMode);
             }
         } else {
             if (!titleSet) {
@@ -1603,7 +1762,7 @@
             }
 
             singleRecordId = jsonObj[result.primaryIdAttribute];
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute);
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute, isCreateMode);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
@@ -1621,24 +1780,26 @@
 
             pre.style.position = 'relative';
 
-            const btn = document.createElement('button');
-            btn.style = `
-            height: 30px;
-            width: auto;
-            margin-right: 24px;
-            margin-top: 10px;
-            position: absolute;
-            right: 10px;
-            cursor: pointer;
-            padding:0;
-            font-size:24;
-            padding: 0px 4px 0px 4px;
-            `
+            if (!isCreateMode) {
+                const btn = document.createElement('button');
+                btn.style = `
+                height: 30px;
+                width: auto;
+                margin-right: 24px;
+                margin-top: 10px;
+                position: absolute;
+                right: 10px;
+                cursor: pointer;
+                padding:0;
+                font-size:24;
+                padding: 0px 4px 0px 4px;
+                `
 
-            btn.innerHTML = '<div>View as raw JSON</div>';
-            btn.onclick = () => { window.location.href = window.location.href.split('#')[0]; };
+                btn.innerHTML = '<div>View as raw JSON</div>';
+                btn.onclick = () => { window.location.href = window.location.href.split('#')[0]; };
 
-            pre.prepend(btn);
+                pre.prepend(btn);
+            }
         }
 
         if (!isPreview && !isMultiple && pluralName === 'workflows' && window.originalResponseCopy.hasOwnProperty('clientdata') && window.originalResponseCopy.clientdata?.startsWith('{"')) {
@@ -1648,15 +1809,61 @@
 
         setPreviewLinkClickHandlers();
         setEditLinkClickHandlers();
+        setDeleteLinkClickHandlers();
         setCopyToClipboardHandlers();
         setLookupEditHandlers();
+
+        if (!isCreateMode && !isPreview && pluralName !== 'workflows') {
+            setCreateNewRecordButton(pre, result.logicalName);
+        }
 
         if (!isMultiple && !isPreview && result.logicalName != null) {
             setImpersonateUserHandlers();
         }
     }
 
-    function previewChanges(changedFields, pluralName, id, impersonateHeader) {
+    function setCreateNewRecordButton(pre, logicalName) {
+        const btn = document.createElement('button');
+        btn.style = `
+            height: 30px;
+            width: auto;
+            margin-right: 160px;
+            margin-top: 10px;
+            position: absolute;
+            right: 10px;
+            cursor: pointer;
+            padding:0;
+            font-size:24;
+            padding: 0px 4px;
+            `
+
+        btn.innerHTML = '<div>Create new record</div>';
+        btn.onclick = async () => {
+            btn.style.display = 'none'
+            await handleCreateNewRecord(logicalName)
+        };
+
+        pre.prepend(btn);
+
+    }
+
+    async function handleCreateNewRecord(logicalName) {
+        const creatableAttributes = await retrieveCreatableAttributes(logicalName);
+        let jsonObject = {};
+
+        for (let attribute of creatableAttributes) {
+            if (attribute.AttributeType === 'Lookup' && attribute.Targets.length > 0) {
+                jsonObject["_" + attribute.LogicalName + "_value"] = null;
+            } else {
+                jsonObject[attribute.LogicalName] = null;
+            }
+        }
+
+        await prettifyWebApi(jsonObject, document.body, window.currentEntityPluralName, false, true);
+        await editRecord(logicalName, window.currentEntityPluralName, null, true);
+    }
+
+    function previewChanges(changedFields, pluralName, id, impersonateHeader, isCreateMode) {
         const changes = [];
 
         for (let key in changedFields) {
@@ -1676,12 +1883,14 @@
             }
 
             change.column = key.replace('@odata.bind', '');
-            change.old = originalValue;
+            if (!isCreateMode) {
+                change.old = originalValue;
+            }
             change.new = updatedValue;
             changes.push(change);
         }
 
-        const table = tableFromChanges(changes);
+        const table = tableFromChanges(changes, isCreateMode);
 
         // disable all stuff to prevent edits after previewing
         disableAllInputs();
@@ -1714,12 +1923,36 @@
         const saveCallback = async function () {
             submitChangesLink.style.display = 'none';
             undoAllLink.style.display = 'none';
-            await commitSave(pluralName, id, changedFields, impersonateHeader, undoAllLink, submitChangesLink);
+            await commitSave(pluralName, id, changedFields, impersonateHeader, undoAllLink, submitChangesLink, isCreateMode);
         }
 
         submitChangesLink.onclick = saveCallback;
 
         editMenu.appendChild(submitChangesLink);
+    }
+
+    function enableAllInputs() {
+        const inputs = document.getElementsByTagName('input');
+        for (let i = 0; i < inputs.length; i++) {
+            inputs[i].disabled = false;
+        }
+        const selects = document.getElementsByTagName('select');
+        for (let i = 0; i < selects.length; i++) {
+            selects[i].disabled = false;
+        }
+        const textareas = document.getElementsByTagName('textarea');
+        for (let i = 0; i < textareas.length; i++) {
+            textareas[i].disabled = false;
+        }
+        const lookupEditLinks = document.getElementsByClassName('lookupEditLinks');
+        for (let i = 0; i < lookupEditLinks.length; i++) {
+            lookupEditLinks[i].style.display = null;
+        }
+    }
+
+    function destroyPreview(){
+        const editMenu = document.getElementById('previewChangesDiv');
+        editMenu.innerHTML = '  ';
     }
 
     function disableAllInputs() {
@@ -1756,21 +1989,21 @@
 
         const response = await odataFetch(url);
 
-        await prettifyWebApi(response, newDiv, pluralName, true);
+        await prettifyWebApi(response, newDiv, pluralName, true, false);
 
         const btn = document.createElement('button');
         btn.style = `
-            height: 30px;
-            width: auto;
-            margin-right: 24px;
-            margin-top: 10px;
-            position: absolute;
-            right: 10px;
-            cursor: pointer;
-            padding:0;
-            font-size:24;
-            padding: 0px 4px 0px 4px;
-            `
+                height: 30px;
+                width: auto;
+                margin-right: 24px;
+                margin-top: 10px;
+                position: absolute;
+                right: 10px;
+                cursor: pointer;
+                padding:0;
+                font-size:24;
+                padding: 0px 4px 0px 4px;
+                `
 
         btn.innerHTML = '<div>Close Preview</div>';
 
@@ -1884,216 +2117,216 @@
         clearCss();
 
         const css = `
-        .multiSelectInput {
-            width: auto !important;
-            margin: 4px 8px 4px 4px !important;
-        }
+            .multiSelectInput {
+                width: auto !important;
+                margin: 4px 8px 4px 4px !important;
+            }
 
-        .multiSelectSubDiv {
-            background: white;
-            margin-left: 8px;
-            padding: 4px 12px 4px 4px;
-            display: flex;
-            align-items: center;
-            border: 1px;
-            border-style: solid;
-            color: black;
-        }
+            .multiSelectSubDiv {
+                background: white;
+                margin-left: 8px;
+                padding: 4px 12px 4px 4px;
+                display: flex;
+                align-items: center;
+                border: 1px;
+                border-style: solid;
+                color: black;
+            }
 
-        .multiSelectDiv {
-            z-index: 40;
-            position: relative !important;
-            margin: 4px;
-        }
+            .multiSelectDiv {
+                z-index: 40;
+                position: relative !important;
+                margin: 4px;
+            }
 
-        #transParentOverlay {
-            background-color:transparent;
-            position:fixed;
-            top:0;
-            left:0;
-            right:0;
-            bottom:0;
-            display:block;
-            z-index: 20;
-        }
-        
-        pre
-        .string { color: firebrick; }
-        .number { color: darkgreen; }
-        .boolean { color: blue; }
-        .null { color: magenta; }
-        .guid { color: firebrick; }
-        .link { color: blue; }
-        .primarykey { color: tomato; }
+            #transParentOverlay {
+                background-color:transparent;
+                position:fixed;
+                top:0;
+                left:0;
+                right:0;
+                bottom:0;
+                display:block;
+                z-index: 20;
+            }
+            
+            pre
+            .string { color: firebrick; }
+            .number { color: darkgreen; }
+            .boolean { color: blue; }
+            .null { color: magenta; }
+            .guid { color: firebrick; }
+            .link { color: blue; }
+            .primarykey { color: tomato; }
 
-        @media (prefers-color-scheme: dark) {
-          *:not(svg, .copyButton, path, a) {
-            color: #d3d3d3f2;
-          }
+            @media (prefers-color-scheme: dark) {
+            *:not(svg, .copyButton, path, a) {
+                color: #d3d3d3f2;
+            }
 
-          .multiSelectSubDiv {
-            background: #131313;
-            color: #d3d3d3f2;
-          }
+            .multiSelectSubDiv {
+                background: #131313;
+                color: #d3d3d3f2;
+            }
 
-          pre
-          .string { color: #5cc3ed; }
-          .number { color: #5bd75b; }
-          .boolean { color: #5bd75b; }
-          .null { color: #ae82eb; }
-          .guid { color: #5cc3ed; }
-          .link { color: lightblue; }
-          .primarykey { color: tomato; }
-          
-          body { 
-            background: #28282B;
-          }
+            pre
+            .string { color: #5cc3ed; }
+            .number { color: #5bd75b; }
+            .boolean { color: #5bd75b; }
+            .null { color: #ae82eb; }
+            .guid { color: #5cc3ed; }
+            .link { color: lightblue; }
+            .primarykey { color: tomato; }
+            
+            body { 
+                background: #28282B;
+            }
 
-          a {
-            color: #E9E9E9;
-          }
+            a {
+                color: #E9E9E9;
+            }
 
-          button {
-            background: #131313;
-          }
-        }
+            button {
+                background: #131313;
+            }
+            }
 
-        .panel input {
-            width: 300px;
-            margin: 0 0 0 8px;
-        }
-
-        @media (prefers-color-scheme: dark) {
             .panel input {
-                background: #131313;
-                border-color: #18181a;
-                height: 14px;
-            }    
-        }
+                width: 300px;
+                margin: 0 0 0 8px;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .panel input {
+                    background: #131313;
+                    border-color: #18181a;
+                    height: 14px;
+                }    
+            }
 
 
-        .panel textarea {
-            width: 400px;
-            margin: 0 0 0 20px;
-        }
-
-        @media (prefers-color-scheme: dark) {
             .panel textarea {
-                background: #131313;
-            }    
-        }
+                width: 400px;
+                margin: 0 0 0 20px;
+            }
 
-        .panel select {
-            margin: 0 0 0 8px;
-        }
+            @media (prefers-color-scheme: dark) {
+                .panel textarea {
+                    background: #131313;
+                }    
+            }
 
-        @media (prefers-color-scheme: dark) {
             .panel select {
-                background: #131313;
-            }  
-        }
+                margin: 0 0 0 8px;
+            }
 
-        .panel span:not(.lookupField):not(.lookupEdit):not(.link) {
-            margin-right: 24px;
-            padding-right: 16px;
-        }
+            @media (prefers-color-scheme: dark) {
+                .panel select {
+                    background: #131313;
+                }  
+            }
 
-        .panel option:empty {
-            display:none;
-        }
+            .panel span:not(.lookupField):not(.lookupEdit):not(.link) {
+                margin-right: 24px;
+                padding-right: 16px;
+            }
 
-        .panel .copyButton {
-            color:dimgray;
-            display: none;
-            cursor: pointer;
-        }           
-        
-        .panel .field:hover .copyButton {
-            display: unset;
-        }
-
-        .panel .copyButton:active {
-            color: darkgreen;
-        }             
-
-        @media (prefers-color-scheme: dark) {
-            .panel .copyButton:active {
-                color: #5bd75b;
+            .panel option:empty {
+                display:none;
             }
 
             .panel .copyButton {
-                color:darkgray;
-            }       
-        }
-
-        .panel .link {
-            margin:0;
-            padding:0;
-        }
-
-        .panel table {
-            color: black;
-            margin-left: 26px;
-            border-collapse: collapse;
-            border: 1px solid black;
-            table-layout: fixed;
-            width: 98%;
-        }
-
-        .panel thead td {
-            font-weight: bold;
-        }
-
-        .panel td {
-            padding: 4px;
-            border: 1px solid;
-            overflow:auto;
-        }
-
-        .panel .impersonationIdFieldLabel {
-            padding:0px;
-            margin:0px;
-        }
-
-        .bodyPreviewed {
-            display: inline-flex;
-            margin-top: 0px;
-            margin-bottom: 0px;
-        }
-
-        .prePreviewed {
-            width: 49vw;
-            overflow-x: scroll;
-            overflow-y: scroll;
-            height: 100%;
-            margin: 0px;
-        }
+                color:dimgray;
+                display: none;
+                cursor: pointer;
+            }           
             
-        .monacoContainer {
-            height: 94vh;
-            width: 98vw;
-            box-sizing: border-box;
-        }
+            .panel .field:hover .copyButton {
+                display: unset;
+            }
 
-        .monacoActions {
-            height: 2em;
-            display: flex;
-            align-items: center;
-            border-top: 1px solid #aaa;
-            padding: 0.2em;
-            box-sizing: border-box;
-        }
-        
-        .monacoLabel {
-            padding-right: 0.3em;
-        }
+            .panel .copyButton:active {
+                color: darkgreen;
+            }             
 
-        .checkBoxDiv {
-            display: flex;
-            padding: 1px 0;
-            align-items: center;
-        }
-        `
+            @media (prefers-color-scheme: dark) {
+                .panel .copyButton:active {
+                    color: #5bd75b;
+                }
+
+                .panel .copyButton {
+                    color:darkgray;
+                }       
+            }
+
+            .panel .link {
+                margin:0;
+                padding:0;
+            }
+
+            .panel table {
+                color: black;
+                margin-left: 26px;
+                border-collapse: collapse;
+                border: 1px solid black;
+                table-layout: fixed;
+                width: 98%;
+            }
+
+            .panel thead td {
+                font-weight: bold;
+            }
+
+            .panel td {
+                padding: 4px;
+                border: 1px solid;
+                overflow:auto;
+            }
+
+            .panel .impersonationIdFieldLabel {
+                padding:0px;
+                margin:0px;
+            }
+
+            .bodyPreviewed {
+                display: inline-flex;
+                margin-top: 0px;
+                margin-bottom: 0px;
+            }
+
+            .prePreviewed {
+                width: 49vw;
+                overflow-x: scroll;
+                overflow-y: scroll;
+                height: 100%;
+                margin: 0px;
+            }
+                
+            .monacoContainer {
+                height: 94vh;
+                width: 98vw;
+                box-sizing: border-box;
+            }
+
+            .monacoActions {
+                height: 2em;
+                display: flex;
+                align-items: center;
+                border-top: 1px solid #aaa;
+                padding: 0.2em;
+                box-sizing: border-box;
+            }
+            
+            .monacoLabel {
+                padding-right: 0.3em;
+            }
+
+            .checkBoxDiv {
+                display: flex;
+                padding: 1px 0;
+                align-items: center;
+            }
+            `
 
         addcss(css);
     }
