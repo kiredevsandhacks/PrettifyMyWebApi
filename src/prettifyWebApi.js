@@ -1012,6 +1012,7 @@
         const lookupEditLinks = document.getElementsByClassName('lookupEditLinks');
         const lookupEditLinkDiv = [...lookupEditLinks].find(l => l.dataset.fieldname === fieldName);
         lookupEditLinkDiv.style.display = 'unset';
+        lookupEditLinkDiv.classList.add('validLookupEditLinks')
 
         setInputMetadataForLookup(input, container, editMenuDiv);
 
@@ -1238,11 +1239,14 @@
         if (isCreateMode) {
             attributesMetadata = await retrieveCreatableAttributes(logicalName);
             let attributesMetadataForUpdate = await retrieveUpdateableAttributes(logicalName);
+            // the statecode is creatable but not listed as such
+            // so add 'manually'
 
-            for (let attribute of attributesMetadataForUpdate) {
-                const attributePresent = attributesMetadata.find(a => a.LogicalName === attribute.LogicalName);
-                if (attributePresent == null) {
-                    attributesMetadata.push(attribute);
+            let stateCodeAttribute = attributesMetadataForUpdate.find(a => a.LogicalName === 'statecode');
+            if (stateCodeAttribute != null) {
+                let stateCodeAttributeAlreadyAdded = attributesMetadata.find(a => a.LogicalName === 'statecode');
+                if (stateCodeAttributeAlreadyAdded == null) {
+                    attributesMetadata.push(stateCodeAttribute);
                 }
             }
         } else {
@@ -1266,11 +1270,15 @@
                 continue;
             }
 
-            // TODO: partylist?
             const attributeType = attribute.AttributeType;
             if (attributeType === 'String' || attributeType === 'EntityName') {
                 createInput(container, false, 'string');
-            } else if (attributeType === 'Memo') {
+            }
+            else if (attributeType === 'Owner') {
+                // TODO: implement later
+                //createInput(container, true, 'owner');
+            }
+            else if (attributeType === 'Memo') {
                 createInput(container, true, 'memo');
             } else if (attributeType === 'Picklist') {
                 const fieldOptionSetMetadata = optionSetMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
@@ -1402,6 +1410,16 @@
                     value = inputValue;
                 }
             }
+            // TODO: implement later
+            // else if (dataType === 'owner') {
+            //     if (inputValue === '') {
+            //         value = null;
+            //     } else {
+            //         value = inputValue;
+            //         fieldName = fieldName + "@odata.bind";
+            //         value = '/systemusers(' + value + ')';
+            //     }
+            // }
             else if (dataType === 'option') {
                 if (!inputValue) {
                     // the select needs to contain a value always, if not, an error happened
@@ -1802,7 +1820,7 @@
         setCopyToClipboardHandlers();
         setLookupEditHandlers();
 
-        if (!isCreateMode && !isPreview && pluralName !== 'workflows') {
+        if (result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
             setCreateNewRecordButton(pre, result.logicalName);
         }
 
@@ -1847,6 +1865,10 @@
                 jsonObject[attribute.LogicalName] = null;
             }
         }
+
+        // 'manually' add this in, because we want to be able to see this
+        // it's not listed as creatable, but it actually is
+        jsonObject['statecode'] = null;
 
         await prettifyWebApi(jsonObject, document.body, window.currentEntityPluralName, false, true);
         await editRecord(logicalName, window.currentEntityPluralName, null, true);
@@ -1933,9 +1955,9 @@
         for (let i = 0; i < textareas.length; i++) {
             textareas[i].disabled = false;
         }
-        const lookupEditLinks = document.getElementsByClassName('lookupEditLinks');
+        const lookupEditLinks = document.getElementsByClassName('validLookupEditLinks');
         for (let i = 0; i < lookupEditLinks.length; i++) {
-            lookupEditLinks[i].style.display = null;
+            lookupEditLinks[i].style.display = 'unset';
         }
     }
 
@@ -1957,7 +1979,7 @@
         for (let i = 0; i < textareas.length; i++) {
             textareas[i].disabled = true;
         }
-        const lookupEditLinks = document.getElementsByClassName('lookupEditLinks');
+        const lookupEditLinks = document.getElementsByClassName('validLookupEditLinks');
         for (let i = 0; i < lookupEditLinks.length; i++) {
             lookupEditLinks[i].style.display = 'none';
         }
