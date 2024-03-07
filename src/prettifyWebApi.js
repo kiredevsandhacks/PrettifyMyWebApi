@@ -1314,7 +1314,7 @@
             } else if (attributeType === 'DateTime') {
                 createInput(container, false, 'datetime');
             } else if (attributeType === 'Uniqueidentifier') {
-                createInput(container, false, 'guid');
+                createInput(container, false, 'uid');
             } else if (attributeType === 'Virtual') {
                 if (attribute.AttributeTypeName?.Value === 'MultiSelectPicklistType') {
                     const fieldOptionSetMetadata = multiSelectOptionSetMetadata.find(osv => osv.LogicalName === attribute.LogicalName);
@@ -1395,22 +1395,11 @@
             const fieldName = input.dataset.fieldname;
 
             let value = '';
-            if (dataType === 'string' || dataType === 'memo') {
+            if (dataType === 'string' || dataType === 'memo' || dataType === 'uid') {
                 if (inputValue === '') {
                     value = null;
                 } else {
                     value = inputValue;
-                }
-            } else if (dataType === 'guid') {
-                if (inputValue === '') {
-                    value = null;
-                } else {
-                    value = inputValue;
-                }
-                if (value != null && value.length != 32) {
-                    alert(fieldName + ' is a guid. It must be exactly 32 characters long.');
-                    resetSubmitControls();
-                    return;
                 }
             }
             else if (dataType === 'option') {
@@ -1950,7 +1939,7 @@
         }
     }
 
-    function destroyPreview(){
+    function destroyPreview() {
         const editMenu = document.getElementById('previewChangesDiv');
         editMenu.innerHTML = '  ';
     }
