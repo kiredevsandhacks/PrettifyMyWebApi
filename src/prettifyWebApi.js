@@ -522,10 +522,10 @@
 
                 if (isSingleRecord) {
                     newObj['Edit this row'] = createLinkSpan('link', await generateEditMenu(logicalName, recordId, false));
+                    newObj['Delete this row'] = createLinkSpan('link', await generateDeleteAnchor(logicalName, recordId, isSingleRecord));
                 } else {
                     newObj['Web Api Link'] = createLinkSpan('link', generateWebApiAnchor(recordId, pluralName));
                 }
-                newObj['Delete this row'] = createLinkSpan('link', await generateDeleteAnchor(logicalName, recordId, isSingleRecord));
             } else if (!isCreateMode && logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
                 newObj['Form Link'] = 'Could not generate link';
                 newObj['Web Api Link'] = 'Could not generate link';
@@ -1227,6 +1227,8 @@
                 }
             }
         }
+
+        deleteLink.style.display = 'unset';
     }
 
     async function editRecord(logicalName, pluralName, id, isCreateMode) {
