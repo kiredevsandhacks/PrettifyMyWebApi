@@ -1846,7 +1846,7 @@
             padding: 0px 4px;
             `
 
-        btn.innerHTML = '<div>Create new record</div>';
+        btn.innerHTML = '<div>Create new row</div>';
         btn.onclick = async () => {
             btn.style.display = 'none'
             await handleCreateNewRecord(logicalName)
