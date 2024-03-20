@@ -231,7 +231,14 @@
             return null;
         }
 
-        const relations = metadata.Entities[0].ManyToOneRelationships.filter(rel => rel.ReferencingEntity === currentRecordLogicalName && rel.ReferencedEntity === lookupEntitylogicalName && rel.ReferencingAttribute === fieldName);
+        let relations = [];
+
+        if (fieldName === 'ownerid') {
+            relations = metadata.Entities[0].ManyToOneRelationships.filter(rel => rel.ReferencingAttribute === fieldName);
+        } else {
+            relations = metadata.Entities[0].ManyToOneRelationships.filter(rel => rel.ReferencingEntity === currentRecordLogicalName && rel.ReferencedEntity === lookupEntitylogicalName && rel.ReferencingAttribute === fieldName);
+        }
+
         if (relations.length != 1) {
             alert(`Something went wrong with retrieving the navigation property for ${currentRecordLogicalName}/${lookupEntitylogicalName}/${fieldName}: ${relations.length} entities found. This should not happen.`);
             return null;
@@ -1277,8 +1284,7 @@
                 createInput(container, false, 'string');
             }
             else if (attributeType === 'Owner') {
-                // TODO: implement later
-                //createInput(container, true, 'owner');
+                createLookupInput(container, ['systemuser', 'team']);
             }
             else if (attributeType === 'Memo') {
                 createInput(container, true, 'memo');
