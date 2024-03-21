@@ -1,5 +1,5 @@
 (async function () {
-    if (window.location.hash !== '#p' && window.location.hash !== '#pf') {
+    if (window.location.hash !== '#p' && window.location.hash !== '#pf' && window.location.hash !== '#pr') {
         return;
     }
 
@@ -41,6 +41,41 @@
         return await response.json();
     }
 
+
+    async function odataPatchWithErrorHandling(url, body) {
+        let headers = {
+            'accept': 'application/json',
+            'content-type': 'application/json',
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            'If-Match': '*',
+        };
+
+        const response = await fetch(url, { method: 'PATCH', headers: headers, body: JSON.stringify(body) });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`${response.status} - ${errorText}`);
+            window.alert(`${response.status} - ${errorText}`);
+
+            return false;
+        }
+        return true;
+    }
+
+    async function odataDeleteWithErrorHandling(url) {
+        const response = await fetch(url, { method: 'DELETE', });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`${response.status} - ${errorText}`);
+            window.alert(`${response.status} - ${errorText}`);
+
+            return false;
+        }
+        return true;
+    }
+
     async function retrievePluralName(logicalName) {
         const pluralNames = await retrieveAllPluralNames();
 
@@ -69,6 +104,14 @@
         allPluralNames = json.value;
 
         return allPluralNames;
+    }
+
+    async function retrieveRelationshipDefinition(relationShipName) {
+        const requestUrl = apiUrl + `RelationshipDefinitions(SchemaName='${relationShipName}')`;
+
+        const json = await odataFetch(requestUrl);
+
+        return json;
     }
 
     // TODO: if lookup query is implemented, maybe refactor this into the retrieveAllPluralNames function? Let it just retrieve all needed metadata from the system in one api call
@@ -331,6 +374,12 @@
         return `<a target='_blank' href='${newLocation}'>Open in Web Api</a>`;
     }
 
+    function generateDisassociateAnchor(pluralName, guid, navigationProperty, classAddition) {
+        const formattedGuid = guid.replace('{', '').replace('}', '');
+
+        return `<a class='disassociateLink${escapeHtml(classAddition)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' data-navigationproperty='${escapeHtml(navigationProperty)}' href='javascript:'>Disassociate this row</a>`;
+    }
+
     async function generatePreviewUrlAnchor(logicalName, guid) {
         const pluralName = await retrievePluralName(logicalName);
         const formattedGuid = guid.replace('{', '').replace('}', '');
@@ -409,7 +458,7 @@
         return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
     }
 
-    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel, primaryNameAttribute, isCreateMode) {
+    async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel, primaryNameAttribute, isCreateMode, relationShipDefinition, isSingleColumnValueOnly) {
         const recordId = jsonObj[primaryIdAttribute]; // we need to get this value before parsing or else it will contain html
 
         const ordered = orderProperties(jsonObj);
@@ -426,7 +475,7 @@
                     for (let nestedKey in value) {
                         let nestedValue = value[nestedKey];
 
-                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, null, true, nestedLevel + 1, null, false);
+                        ordered[key][nestedKey] = await enrichObjectWithHtml(nestedValue, null, null, null, null, true, nestedLevel + 1, null, false, null, false);
                     }
                 }
                 else {
@@ -442,7 +491,7 @@
             }
 
             if (typeof (value) === 'object' && value != null) {
-                ordered[key] = await enrichObjectWithHtml(value, null, null, null, null, true, nestedLevel + 1, null, false);
+                ordered[key] = await enrichObjectWithHtml(value, null, null, null, null, true, nestedLevel + 1, null, false, null, false);
                 continue;
             }
 
@@ -533,7 +582,15 @@
                 } else {
                     newObj['Web Api Link'] = createLinkSpan('link', generateWebApiAnchor(recordId, pluralName));
                 }
-            } else if (!isCreateMode && logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
+
+                if (relationShipDefinition != null) {
+                    if (relationShipDefinition.RelationshipType === 'ManyToManyRelationship') {
+                        newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, '', 'ManyToMany'));
+                    } else if (relationShipDefinition.RelationshipType === 'OneToManyRelationship') {
+                        newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, relationShipDefinition.ReferencingEntityNavigationPropertyName, 'OneToMany',));
+                    }
+                }
+            } else if (!isSingleColumnValueOnly && !isCreateMode && logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
                 newObj['Form Link'] = 'Could not generate link';
                 newObj['Web Api Link'] = 'Could not generate link';
             }
@@ -617,6 +674,57 @@
 
             deleteLink.onclick = async function () {
                 await deleteRecord(logicalName, pluralName, id);
+            }
+        }
+    }
+
+    function setDisassociateClickHandlers() {
+        const disassociateLinksOneToMany = document.getElementsByClassName('disassociateLinkOneToMany');
+
+        for (let disassociateLink of disassociateLinksOneToMany) {
+            const pluralName = disassociateLink.dataset.pluralname;
+            const id = disassociateLink.dataset.guid;
+            const navigationProperty = disassociateLink.dataset.navigationproperty
+
+            disassociateLink.onclick = async function () {
+                await disassociateRowOneToMany(pluralName, id, navigationProperty);
+            }
+        }
+
+        const disassociateLinksManyToMany = document.getElementsByClassName('disassociateLinkManyToMany');
+
+        for (let disassociateLink of disassociateLinksManyToMany) {
+            const pluralName = disassociateLink.dataset.pluralname;
+            const id = disassociateLink.dataset.guid;
+
+            disassociateLink.onclick = async function () {
+                await disassociateRowManyToMany(pluralName, id);
+            }
+        }
+    }
+
+    async function disassociateRowOneToMany(pluralName, id, navigationProperty) {
+        if (confirm('Are you sure you want to disassociate this row?')) {
+            var body = {};
+            body[navigationProperty + '@odata.bind'] = null;
+
+            var result = await odataPatchWithErrorHandling(apiUrl + pluralName + '(' + id + ')', body);
+
+            if (result) {
+                alert('Row was disassociated. This page will now reload.');
+                window.location.reload();
+            }
+        }
+    }
+
+    async function disassociateRowManyToMany(pluralName, id, navigationProperty) {
+        if (confirm('Are you sure you want to disassociate this row?')) {
+            const url = window.location.pathname + '/$ref?$id=' + location.origin + apiUrl + pluralName + '(' + id + ')';
+            var result = await odataDeleteWithErrorHandling(url);
+
+            if (result) {
+                alert('Row was disassociated. This page will now reload.');
+                window.location.reload();
             }
         }
     }
@@ -1418,16 +1526,6 @@
                     value = inputValue;
                 }
             }
-            // TODO: implement later
-            // else if (dataType === 'owner') {
-            //     if (inputValue === '') {
-            //         value = null;
-            //     } else {
-            //         value = inputValue;
-            //         fieldName = fieldName + "@odata.bind";
-            //         value = '/systemusers(' + value + ')';
-            //     }
-            // }
             else if (dataType === 'option') {
                 if (!inputValue) {
                     // the select needs to contain a value always, if not, an error happened
@@ -1739,8 +1837,9 @@
 
     async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview, isCreateMode) {
         const isMultiple = (jsonObj.value && Array.isArray(jsonObj.value));
+        const isSingleColumnValueOnly = Object.keys(jsonObj).length === 2 && jsonObj['@odata.context'] && jsonObj.value;
 
-        const result = await retrieveLogicalAndPrimaryKeyAndPrimaryName(pluralName);
+        let result = await retrieveLogicalAndPrimaryKeyAndPrimaryName(pluralName);
 
         if (window.location.hash === '#pf' && jsonObj.value.length === 1) {
             const recordId = jsonObj.value[0][result.primaryIdAttribute];
@@ -1750,13 +1849,59 @@
         }
 
         let singleRecordId = '';
+        let relationShipDefinition = null;
+
+        if (location.hash === '#pr') {
+            let relationShipName = '';
+            try {
+                relationShipName = location.pathname.split('/').slice(-1)[0];
+
+                relationShipDefinition = await retrieveRelationshipDefinition(relationShipName);
+
+                if (relationShipDefinition.error) {
+                    throw relationShipDefinition.error.message;
+                } else {
+                    let overridenPluralName = null;
+
+                    if (relationShipDefinition.RelationshipType === 'ManyToManyRelationship') {
+                        if (relationShipDefinition.Entity1LogicalName !== result.logicalName && relationShipDefinition.Entity2LogicalName === result.logicalName) {
+                            overridenPluralName = await retrievePluralName(relationShipDefinition.Entity1LogicalName);
+                        } else if (relationShipDefinition.Entity1LogicalName === result.logicalName && relationShipDefinition.Entity2LogicalName !== result.logicalName) {
+                            overridenPluralName = await retrievePluralName(relationShipDefinition.Entity2LogicalName);
+                        } else if (relationShipDefinition.Entity1LogicalName === result.logicalName && relationShipDefinition.Entity2LogicalName === result.logicalName) {
+                            // self referencing entity. No need to override the context
+                        } else {
+                            throw `Cannot map relationship to either ${relationShipDefinition.Entity1LogicalName} or ${relationShipDefinition.Entity2LogicalName}`;
+                        }
+                    } else if (relationShipDefinition.RelationshipType === 'OneToManyRelationship') {
+                        overridenPluralName = await retrievePluralName(relationShipDefinition.ReferencingEntity);
+                    } else {
+                        throw `Cannot handle RelationshipType ${relationShipDefinition.RelationshipType}`;
+                    }
+
+                    if (overridenPluralName != null && overridenPluralName !== '') {
+                        // override the context to be the referenced table
+                        result = await retrieveLogicalAndPrimaryKeyAndPrimaryName(overridenPluralName);
+                        pluralName = overridenPluralName;
+                        window.currentEntityPluralName = overridenPluralName;
+                    }
+                }
+            } catch (err) {
+                relationShipDefinition = null;
+                alert(`Something went wrong with retrieving the relationship definition for '${relationShipName}'. Error message: ${err}`);
+            }
+        }
 
         // sdk messages other than retrieve or retrievemultiple
         if (!result.logicalName) {
-            jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1, null, isCreateMode);
+            jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1, null, isCreateMode, null, false);
         } else if (isMultiple) {
             if (!titleSet) {
-                document.title = pluralName;
+                if (relationShipDefinition != null) {
+                    document.title = 'related ' + pluralName;
+                } else {
+                    document.title = pluralName;
+                }
                 titleSet = true;
             }
             const valueKeyWithCount = 'value (' + jsonObj.value.length + ' records)';
@@ -1765,7 +1910,7 @@
             delete jsonObj.value;
 
             for (const key in jsonObj[valueKeyWithCount]) {
-                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2, result.primaryNameAttribute, isCreateMode);
+                jsonObj[valueKeyWithCount][key] = await enrichObjectWithHtml(jsonObj[valueKeyWithCount][key], result.logicalName, pluralName, result.primaryIdAttribute, false, false, 2, result.primaryNameAttribute, isCreateMode, relationShipDefinition, false);
             }
         } else {
             if (!titleSet) {
@@ -1777,7 +1922,8 @@
             }
 
             singleRecordId = jsonObj[result.primaryIdAttribute];
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute, isCreateMode);
+
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute, isCreateMode, null, isSingleColumnValueOnly);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
@@ -1822,17 +1968,20 @@
             pre.dataset.clientdata = window.originalResponseCopy.clientdata;
         }
 
-        setPreviewLinkClickHandlers();
-        setEditLinkClickHandlers();
-        setDeleteLinkClickHandlers();
-        setCopyToClipboardHandlers();
-        setLookupEditHandlers();
+        if (!isSingleColumnValueOnly) {
+            setPreviewLinkClickHandlers();
+            setEditLinkClickHandlers();
+            setDeleteLinkClickHandlers();
+            setCopyToClipboardHandlers();
+            setLookupEditHandlers();
+            setDisassociateClickHandlers();
+        }
 
         if (result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
             setCreateNewRecordButton(pre, result.logicalName);
         }
 
-        if (!isMultiple && !isPreview && result.logicalName != null) {
+        if (!isSingleColumnValueOnly && !isMultiple && !isPreview && result.logicalName != null) {
             setImpersonateUserHandlers();
         }
     }
@@ -2102,7 +2251,7 @@
 
         const response = await odataFetch(window.location.href);
 
-        window.currentEntityPluralName = window.location.pathname.split('/').pop().split('(').shift();
+        window.currentEntityPluralName = window.location.pathname.split('(').shift().split('/').pop();
 
         await prettifyWebApi(response, document.body, window.currentEntityPluralName, false);
 
