@@ -1125,6 +1125,7 @@
         container.parentElement.appendChild(makeNullDiv);
 
         const lookupEditLinks = document.getElementsByClassName('lookupEditLinks');
+
         const lookupEditLinkDiv = [...lookupEditLinks].find(l => l.dataset.fieldname === fieldName);
         lookupEditLinkDiv.style.display = 'unset';
         lookupEditLinkDiv.classList.add('validLookupEditLinks')
@@ -1134,7 +1135,6 @@
         const lookupQueryResultPreview = document.createElement('span');
         lookupQueryResultPreview.style.margin = '0 0 0 10px';
         editMenuDiv.appendChild(lookupQueryResultPreview);
-
 
         let targetToCache = lookupType;
         if (targetToCache === 'null' || targetToCache == null || targetToCache == undefined) {
@@ -1356,9 +1356,9 @@
         if (isCreateMode) {
             attributesMetadata = await retrieveCreatableAttributes(logicalName);
             let attributesMetadataForUpdate = await retrieveUpdateableAttributes(logicalName);
+
             // the statecode is creatable but not listed as such
             // so add 'manually'
-
             let stateCodeAttribute = attributesMetadataForUpdate.find(a => a.LogicalName === 'statecode');
             if (stateCodeAttribute != null) {
                 let stateCodeAttributeAlreadyAdded = attributesMetadata.find(a => a.LogicalName === 'statecode');
@@ -1933,6 +1933,7 @@
         htmlElement.innerText = '';
 
         const pre = document.createElement('pre');
+        pre.style.margin = '0px';
         htmlElement.appendChild(pre).innerHTML = json;
 
         if (!isPreview) {
@@ -1945,8 +1946,8 @@
                 const btn = document.createElement('button');
                 btn.style = `
                 height: 30px;
-                width: auto;
-                margin-right: 24px;
+                width: 122px;
+                margin-right: 18px;
                 margin-top: 10px;
                 position: absolute;
                 right: 10px;
@@ -1979,6 +1980,7 @@
 
         if (result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
             setCreateNewRecordButton(pre, result.logicalName);
+            setBrowseRelationShipsButton(pre, result.logicalName);
         }
 
         if (!isSingleColumnValueOnly && !isMultiple && !isPreview && result.logicalName != null) {
@@ -1990,8 +1992,8 @@
         const btn = document.createElement('button');
         btn.style = `
             height: 30px;
-            width: auto;
-            margin-right: 160px;
+            width: 122px;
+            margin-right: 158px;
             margin-top: 10px;
             position: absolute;
             right: 10px;
@@ -2008,6 +2010,32 @@
         };
 
         pre.prepend(btn);
+    }
+
+    function setBrowseRelationShipsButton(pre, logicalName) {
+        const btn = document.createElement('button');
+        btn.style = `
+            height: 30px;
+            width: 122px;
+            margin-right: 296px;
+            margin-top: 10px;
+            position: absolute;
+            right: 10px;
+            cursor: pointer;
+            padding:0;
+            font-size:24;
+            padding: 0px 4px;
+            `
+
+        btn.innerHTML = '<div>View relationships</div>';
+        btn.onclick = async () => {
+            await handleBrowseRelationships(logicalName)
+        };
+
+        pre.prepend(btn);
+    }
+
+    async function handleBrowseRelationships(logicalName) {
 
     }
 
@@ -2018,7 +2046,11 @@
         for (let attribute of creatableAttributes) {
             if (attribute.AttributeType === 'Lookup' && attribute.Targets.length > 0) {
                 jsonObject["_" + attribute.LogicalName + "_value"] = null;
-            } else {
+            } else if (attribute.AttributeType === 'Owner') {
+                debugger
+                jsonObject["_" + attribute.LogicalName + "_value"] = null;
+            }
+            else {
                 jsonObject[attribute.LogicalName] = null;
             }
         }
@@ -2162,8 +2194,8 @@
         const btn = document.createElement('button');
         btn.style = `
                 height: 30px;
-                width: auto;
-                margin-right: 24px;
+                width: 122px;
+                margin-right: 18px;
                 margin-top: 10px;
                 position: absolute;
                 right: 10px;
