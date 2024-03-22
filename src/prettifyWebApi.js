@@ -107,11 +107,21 @@
     }
 
     async function retrieveRelationshipDefinition(relationShipName) {
-        const requestUrl = apiUrl + `RelationshipDefinitions(SchemaName='${relationShipName}')`;
+        const relationships = await retrieveRelationships();
+        const combined = [...relationships.ManyToManyRelationships, ...relationships.ManyToOneRelationships, ...relationships.OneToManyRelationships];
+        const relationship = combined.filter(r =>
+            r.SchemaName === relationShipName ||
+            r.Entity1NavigationPropertyName === relationShipName ||
+            r.Entity2NavigationPropertyName === relationShipName ||
+            r.ReferencedEntityNavigationPropertyName === relationShipName ||
+            r.ReferencingEntityNavigationPropertyName === relationShipName
+        );
 
-        const json = await odataFetch(requestUrl);
+        if (relationship.length !== 1) {
+            return null;
+        }
 
-        return json;
+        return relationship[0];
     }
 
     // TODO: if lookup query is implemented, maybe refactor this into the retrieveAllPluralNames function? Let it just retrieve all needed metadata from the system in one api call
@@ -288,6 +298,24 @@
         }
 
         return relations[0].ReferencingEntityNavigationPropertyName;
+    }
+
+    async function retrieveRelationships() {
+        const currentRecordLogicalName = await retrieveLogicalName(window.currentEntityPluralName);
+
+        const metadata = await retrieveEntityClientMetadata(currentRecordLogicalName);
+
+        if (metadata.Entities.length != 1) {
+            return null;
+        }
+
+        const result = {
+            ManyToManyRelationships: metadata.Entities[0].ManyToManyRelationships,
+            OneToManyRelationships: metadata.Entities[0].OneToManyRelationships,
+            ManyToOneRelationships: metadata.Entities[0].ManyToOneRelationships
+        };
+
+        return result;
     }
 
     async function doLookupInputQuery(pluralName, fieldToFilterOn, fieldToDisplay, primaryKeyfieldname, query) {
@@ -584,9 +612,11 @@
                 }
 
                 if (relationShipDefinition != null) {
-                    if (relationShipDefinition.RelationshipType === 'ManyToManyRelationship') {
+                    if (window.isManyToOneContext) {
+                        newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, relationShipDefinition.ReferencingEntityNavigationPropertyName, 'ManyToOne'));
+                    } else if (relationShipDefinition.RelationshipType === 1) {
                         newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, '', 'ManyToMany'));
-                    } else if (relationShipDefinition.RelationshipType === 'OneToManyRelationship') {
+                    } else if (relationShipDefinition.RelationshipType === 0) {
                         newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, relationShipDefinition.ReferencingEntityNavigationPropertyName, 'OneToMany',));
                     }
                 }
@@ -691,6 +721,16 @@
             }
         }
 
+        const disassociateLinksManyToOne = document.getElementsByClassName('disassociateLinkManyToOne');
+
+        for (let disassociateLink of disassociateLinksManyToOne) {
+            const navigationProperty = disassociateLink.dataset.navigationproperty
+
+            disassociateLink.onclick = async function () {
+                await disassociateRowManyToOne(navigationProperty);
+            }
+        }
+
         const disassociateLinksManyToMany = document.getElementsByClassName('disassociateLinkManyToMany');
 
         for (let disassociateLink of disassociateLinksManyToMany) {
@@ -699,6 +739,22 @@
 
             disassociateLink.onclick = async function () {
                 await disassociateRowManyToMany(pluralName, id);
+            }
+        }
+    }
+
+    async function disassociateRowManyToOne(navigationProperty) {
+        if (confirm('Are you sure you want to disassociate this row?')) {
+            var body = {};
+            body[navigationProperty + '@odata.bind'] = null;
+
+            const recordId = location.pathname.split(')')[0].split('(')[1];
+
+            var result = await odataPatchWithErrorHandling(apiUrl + window.originalEntityPluralName + '(' + recordId + ')', body);
+
+            if (result) {
+                alert('Row was disassociated. This page will now reload.');
+                window.location.reload();
             }
         }
     }
@@ -1851,19 +1907,22 @@
         let singleRecordId = '';
         let relationShipDefinition = null;
 
-        if (location.hash === '#pr') {
+        // the second part of this statement is a bit weird
+        // but we do this to check if the context is 'manually' expanded on a relationship
+        const inferredRelationship = !isSingleColumnValueOnly && location.pathname.includes(')/');
+        if (location.hash === '#pr' || inferredRelationship) {
             let relationShipName = '';
             try {
                 relationShipName = location.pathname.split('/').slice(-1)[0];
 
                 relationShipDefinition = await retrieveRelationshipDefinition(relationShipName);
 
-                if (relationShipDefinition.error) {
-                    throw relationShipDefinition.error.message;
+                if (relationShipDefinition == null) {
+                    throw `Relationship not found`;
                 } else {
                     let overridenPluralName = null;
-
-                    if (relationShipDefinition.RelationshipType === 'ManyToManyRelationship') {
+                    
+                    if (relationShipDefinition.RelationshipType === 1) {
                         if (relationShipDefinition.Entity1LogicalName !== result.logicalName && relationShipDefinition.Entity2LogicalName === result.logicalName) {
                             overridenPluralName = await retrievePluralName(relationShipDefinition.Entity1LogicalName);
                         } else if (relationShipDefinition.Entity1LogicalName === result.logicalName && relationShipDefinition.Entity2LogicalName !== result.logicalName) {
@@ -1873,8 +1932,18 @@
                         } else {
                             throw `Cannot map relationship to either ${relationShipDefinition.Entity1LogicalName} or ${relationShipDefinition.Entity2LogicalName}`;
                         }
-                    } else if (relationShipDefinition.RelationshipType === 'OneToManyRelationship') {
-                        overridenPluralName = await retrievePluralName(relationShipDefinition.ReferencingEntity);
+                    } else if (relationShipDefinition.RelationshipType === 0) {
+                        if (relationShipDefinition.ReferencingEntity !== result.logicalName && relationShipDefinition.ReferencedEntity === result.logicalName) {
+                            overridenPluralName = await retrievePluralName(relationShipDefinition.ReferencingEntity);
+                        } else if (relationShipDefinition.ReferencingEntity === result.logicalName && relationShipDefinition.ReferencedEntity !== result.logicalName) {
+                            overridenPluralName = await retrievePluralName(relationShipDefinition.ReferencedEntity);
+                            window.originalEntityPluralName = pluralName;
+                            window.isManyToOneContext = true;
+                        } else if (relationShipDefinition.ReferencingEntity === result.logicalName && relationShipDefinition.ReferencedEntity === result.logicalName) {
+                            // self referencing entity. No need to override the context
+                        } else {
+                            throw `Cannot map relationship to either ${relationShipDefinition.ReferencingEntity} or ${relationShipDefinition.ReferencedEntity}`;
+                        }
                     } else {
                         throw `Cannot handle RelationshipType ${relationShipDefinition.RelationshipType}`;
                     }
@@ -1888,7 +1957,9 @@
                 }
             } catch (err) {
                 relationShipDefinition = null;
-                alert(`Something went wrong with retrieving the relationship definition for '${relationShipName}'. Error message: ${err}`);
+                if (!inferredRelationship) {
+                    alert(`Something went wrong with retrieving the relationship definition for '${relationShipName}'. Error message: ${err}`);
+                }
             }
         }
 
@@ -1922,8 +1993,8 @@
             }
 
             singleRecordId = jsonObj[result.primaryIdAttribute];
-
-            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute, isCreateMode, null, isSingleColumnValueOnly);
+            
+            jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute, isCreateMode, relationShipDefinition, isSingleColumnValueOnly);
         }
 
         let json = JSON.stringify(jsonObj, undefined, 3);
@@ -1980,6 +2051,9 @@
 
         if (result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
             setCreateNewRecordButton(pre, result.logicalName);
+        }
+
+        if (result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows' && !isMultiple) {
             setBrowseRelationShipsButton(pre, result.logicalName);
         }
 
@@ -2036,7 +2110,110 @@
     }
 
     async function handleBrowseRelationships(logicalName) {
+        const relationships = await retrieveRelationships();
+        if (relationships == null) {
+            alert(`An error occurred while retrieving relationships. Cannot continue.`);
+            return;
+        }
 
+        document.body.innerText = '';
+
+        var relationshipBrowser = document.createElement('pre');
+        relationshipBrowser.id = 'relationshipBrowser';
+        relationshipBrowser.style.display = 'none';
+        document.body.appendChild(relationshipBrowser);
+
+        updateRelationshipBrowserContents(relationshipBrowser, relationships, null, logicalName);
+    }
+
+    function updateRelationshipBrowserContents(relationshipBrowser, relationships, optionalFilter, logicalName) {
+        let manyToMany = relationships.ManyToManyRelationships
+        let oneToMany = relationships.OneToManyRelationships;
+
+        if (optionalFilter != null && optionalFilter !== '') {
+            optionalFilter = optionalFilter.toLowerCase();
+
+            manyToMany = manyToMany.filter(r =>
+                r.Entity1LogicalName?.toLowerCase()?.includes(optionalFilter) ||
+                r.Entity2LogicalName?.toLowerCase()?.includes(optionalFilter) ||
+                r.IntersectEntityName?.toLowerCase()?.includes(optionalFilter) ||
+                r.Entity1IntersectAttribute?.toLowerCase()?.includes(optionalFilter) ||
+                r.Entity2IntersectAttribute?.toLowerCase()?.includes(optionalFilter) ||
+                r.Entity1NavigationPropertyName?.toLowerCase()?.includes(optionalFilter) ||
+                r.Entity2NavigationPropertyName?.toLowerCase()?.includes(optionalFilter) ||
+                r.SchemaName?.toLowerCase()?.includes(optionalFilter)
+            );
+
+
+            oneToMany = oneToMany.filter(r =>
+                r.ReferencedAttribute?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencedEntity?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencingAttribute?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencingEntity?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencedEntityNavigationPropertyName?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencingEntityNavigationPropertyName?.toLowerCase()?.includes(optionalFilter) ||
+                r.SchemaName?.toLowerCase()?.includes(optionalFilter)
+            );
+        }
+
+        const manyToManyHeader = document.createElement('h2');
+        manyToManyHeader.innerText = 'Many to Many Relationships';
+        relationshipBrowser.appendChild(manyToManyHeader);
+
+        for (let relationship of manyToMany) {
+            createRelationshipElementForManyToMany(relationship, logicalName, relationshipBrowser);
+        }
+
+        const oneToManyHeader = document.createElement('h2');
+        oneToManyHeader.innerText = 'One to Many Relationships';
+        relationshipBrowser.appendChild(oneToManyHeader);
+
+        for (let relationship of oneToMany) {
+            createRelationshipElementForOneToMany(relationship, logicalName, relationshipBrowser);
+        }
+
+        relationshipBrowser.style.display = 'grid';
+
+    }
+
+    function createRelationshipElementForManyToMany(relationship, logicalName, container) {
+        let navigationProperty = null;
+
+        if (relationship.Entity1LogicalName === logicalName) {
+            navigationProperty = relationship.Entity1NavigationPropertyName;
+        } else if (relationship.Entity2LogicalName === logicalName) {
+            navigationProperty = relationship.Entity2NavigationPropertyName;
+        } else {
+            alert(`Could find the navigation property for relationship ${relationship.SchemaName}`);
+            return;
+        }
+
+        const link = createRelationshipLink(navigationProperty, relationship.SchemaName);
+        container.appendChild(link);
+    }
+
+    function createRelationshipElementForOneToMany(relationship, logicalName, container) {
+        let navigationProperty = null;
+
+        if (relationship.ReferencedEntity === logicalName) {
+            navigationProperty = relationship.ReferencedEntityNavigationPropertyName;
+        } else {
+            alert(`Could find the navigation property for relationship '${relationship.SchemaName}'`);
+            return;
+        }
+
+        const link = createRelationshipLink(navigationProperty, relationship.SchemaName);
+        container.appendChild(link);
+    }
+
+    function createRelationshipLink(navigationProperty, innerText) {
+        const element = document.createElement('a');
+        element.target = '_blank';
+        element.style.margin = '4px 0px';
+        element.style.width = 'fit-content';
+        element.href = window.location.pathname + '/' + navigationProperty + '#pr';
+        element.innerText = innerText;
+        return element;
     }
 
     async function handleCreateNewRecord(logicalName) {
@@ -2346,10 +2523,31 @@
                 left:0;
                 right:0;
                 bottom:0;
+                margin:0px;
                 display:block;
                 z-index: 20;
             }
+
+            #relationshipBrowser {
+                background-color:white;
+                position:absolute;
+                top:0;
+                left:0;
+                right:0;
+                bottom:0;
+                padding: 20px;
+                margin:0px;
+                display:none;
+                z-index: 100;  
+                height: fit-content;
+            }
             
+            @media (prefers-color-scheme: dark) {
+                #relationshipBrowser {
+                    background-color: #28282B;
+                }
+            }
+
             pre
             .string { color: firebrick; }
             .number { color: darkgreen; }
