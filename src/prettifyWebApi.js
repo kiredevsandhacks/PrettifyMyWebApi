@@ -751,12 +751,12 @@
 
     async function disassociateRowManyToOne(navigationProperty) {
         if (confirm('Are you sure you want to disassociate this row?')) {
-            var body = {};
+            const body = {};
             body[navigationProperty + '@odata.bind'] = null;
 
             const recordId = location.pathname.split(')')[0].split('(')[1];
 
-            var result = await odataPatchWithErrorHandling(apiUrl + window.originalEntityPluralName + '(' + recordId + ')', body);
+            const result = await odataPatchWithErrorHandling(apiUrl + window.originalEntityPluralName + '(' + recordId + ')', body);
 
             if (result) {
                 alert('Row was disassociated. This page will now reload.');
@@ -767,10 +767,10 @@
 
     async function disassociateRowOneToMany(pluralName, id, navigationProperty) {
         if (confirm('Are you sure you want to disassociate this row?')) {
-            var body = {};
+            const body = {};
             body[navigationProperty + '@odata.bind'] = null;
 
-            var result = await odataPatchWithErrorHandling(apiUrl + pluralName + '(' + id + ')', body);
+            const result = await odataPatchWithErrorHandling(apiUrl + pluralName + '(' + id + ')', body);
 
             if (result) {
                 alert('Row was disassociated. This page will now reload.');
@@ -782,7 +782,7 @@
     async function disassociateRowManyToMany(pluralName, id, navigationProperty) {
         if (confirm('Are you sure you want to disassociate this row?')) {
             const url = window.location.pathname + '/$ref?$id=' + location.origin + apiUrl + pluralName + '(' + id + ')';
-            var result = await odataDeleteWithErrorHandling(url);
+            const result = await odataDeleteWithErrorHandling(url);
 
             if (result) {
                 alert('Row was disassociated. This page will now reload.');
@@ -997,9 +997,9 @@
         optionSet.forEach(function (option) {
             const formattedOption = option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label;
 
-            var isSelected = values?.find(v => v === option.Value?.toString()) != null;
+            const isSelected = values?.find(v => v === option.Value?.toString()) != null;
 
-            var checked = isSelected ? 'checked' : '';
+            const checked = isSelected ? 'checked' : '';
 
             multiSelectDivHtml += `<div class='multiSelectSubDiv'><input class='multiSelectInput' type='checkbox' ${checked} data-label='${escapeHtml(option.Label?.UserLocalizedLabel?.Label)}' data-value='${escapeHtml(option.Value)}'>${escapeHtml(formattedOption)}</div>`;
         });
@@ -1018,7 +1018,7 @@
             transParentOverlay.style.display = 'unset';
         };
 
-        var updateLabel = function () {
+        const updateLabel = function () {
             let selectLabel = '';
             multiSelectDiv.querySelectorAll('input').forEach(input => {
                 if (input.checked) {
@@ -2055,11 +2055,11 @@
             setDisassociateClickHandlers();
         }
 
-        if (result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
+        if (relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
             setCreateNewRecordButton(pre, result.logicalName);
         }
 
-        if (relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows' && !isMultiple) {
+        if (!isSingleColumnValueOnly && relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows' && !isMultiple) {
             setBrowseRelationShipsButton(pre, result.logicalName);
         }
 
@@ -2125,10 +2125,19 @@
 
         document.body.innerText = '';
 
-        var relationshipBrowser = document.createElement('pre');
+        const relationshipBrowser = document.createElement('pre');
         relationshipBrowser.id = 'relationshipBrowser';
         relationshipBrowser.style.display = 'grid';
         document.body.appendChild(relationshipBrowser);
+
+        const closeButton = document.createElement('button');
+        relationshipBrowser.appendChild(closeButton);
+        closeButton.style.position = 'fixed';
+        closeButton.style.height = '30px';
+        closeButton.style.top = '20px';
+        closeButton.style.right = '20px';
+        closeButton.innerText = 'Close relationships';
+        closeButton.onclick = () => window.location.reload();
 
         const filterLabel = document.createElement('h3');
         filterLabel.innerText = 'Filter relationships';
@@ -2286,7 +2295,6 @@
             if (attribute.AttributeType === 'Lookup' && attribute.Targets.length > 0) {
                 jsonObject["_" + attribute.LogicalName + "_value"] = null;
             } else if (attribute.AttributeType === 'Owner') {
-                debugger
                 jsonObject["_" + attribute.LogicalName + "_value"] = null;
             }
             else {
@@ -2297,7 +2305,7 @@
         // 'manually' add this in, because we want to be able to see this
         // it's not listed as creatable, but it actually is
         jsonObject['statecode'] = null;
-
+        debugger
         await prettifyWebApi(jsonObject, document.body, window.currentEntityPluralName, false, true);
         await editRecord(logicalName, window.currentEntityPluralName, null, true);
     }
@@ -2532,7 +2540,7 @@
 
         addMainCss();
 
-        var transParentOverlay = document.createElement('div');
+        const transParentOverlay = document.createElement('div');
         transParentOverlay.id = 'transParentOverlay';
         transParentOverlay.style.display = 'none';
         transParentOverlay.onclick = () => {
