@@ -7,6 +7,15 @@
     "background": {
         "service_worker": "background.js"
     },
+    "commands": {
+        "Ctrl+M": {
+            "suggested_key": {
+                "default": "Ctrl+M",
+                "mac": "Command+M"
+            },
+            "description": "Ctrl+M."
+        }
+    },
     "action": {},
     "permissions": [
         "activeTab",

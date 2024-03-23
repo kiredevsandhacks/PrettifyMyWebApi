@@ -1,6 +1,7 @@
 async function handler(request, sender, sendResponse) {
   chrome.tabs.query({ active: true, currentWindow: true }, async function (tabs) {
     if (request.action === 'prettifyWebApi' && tabs[0].id === sender.tab.id) {
+
       await chrome.scripting.executeScript({
         target: { tabId: sender.tab.id },
         files: ['prettifyWebApi.js']
@@ -21,4 +22,13 @@ chrome.action.onClicked.addListener(async function (tab) {
     target: { tabId: tab.id },
     files: ['content.js']
   });
+});
+
+chrome.commands.onCommand.addListener((shortcut) => {
+  const isProdMode = 'update_url' in chrome.runtime.getManifest();
+  if (!isProdMode) {
+    if (shortcut.includes("+M")) {
+      chrome.runtime.reload();
+    }
+  }
 });

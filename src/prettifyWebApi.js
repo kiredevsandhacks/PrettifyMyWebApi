@@ -717,7 +717,9 @@
             const navigationProperty = disassociateLink.dataset.navigationproperty
 
             disassociateLink.onclick = async function () {
+                disassociateLink.style.display = 'none';
                 await disassociateRowOneToMany(pluralName, id, navigationProperty);
+                disassociateLink.style.display = 'unset';
             }
         }
 
@@ -727,7 +729,9 @@
             const navigationProperty = disassociateLink.dataset.navigationproperty
 
             disassociateLink.onclick = async function () {
+                disassociateLink.style.display = 'none';
                 await disassociateRowManyToOne(navigationProperty);
+                disassociateLink.style.display = 'unset';
             }
         }
 
@@ -738,7 +742,9 @@
             const id = disassociateLink.dataset.guid;
 
             disassociateLink.onclick = async function () {
+                disassociateLink.style.display = 'none';
                 await disassociateRowManyToMany(pluralName, id);
+                disassociateLink.style.display = 'unset';
             }
         }
     }
@@ -1921,7 +1927,7 @@
                     throw `Relationship not found`;
                 } else {
                     let overridenPluralName = null;
-                    
+
                     if (relationShipDefinition.RelationshipType === 1) {
                         if (relationShipDefinition.Entity1LogicalName !== result.logicalName && relationShipDefinition.Entity2LogicalName === result.logicalName) {
                             overridenPluralName = await retrievePluralName(relationShipDefinition.Entity1LogicalName);
@@ -1993,7 +1999,7 @@
             }
 
             singleRecordId = jsonObj[result.primaryIdAttribute];
-            
+
             jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute, isCreateMode, relationShipDefinition, isSingleColumnValueOnly);
         }
 
@@ -2053,7 +2059,7 @@
             setCreateNewRecordButton(pre, result.logicalName);
         }
 
-        if (result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows' && !isMultiple) {
+        if (relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows' && !isMultiple) {
             setBrowseRelationShipsButton(pre, result.logicalName);
         }
 
@@ -2103,6 +2109,7 @@
 
         btn.innerHTML = '<div>View relationships</div>';
         btn.onclick = async () => {
+            btn.style.display = 'none';
             await handleBrowseRelationships(logicalName)
         };
 
@@ -2120,15 +2127,33 @@
 
         var relationshipBrowser = document.createElement('pre');
         relationshipBrowser.id = 'relationshipBrowser';
-        relationshipBrowser.style.display = 'none';
+        relationshipBrowser.style.display = 'grid';
         document.body.appendChild(relationshipBrowser);
 
-        updateRelationshipBrowserContents(relationshipBrowser, relationships, null, logicalName);
+        const filterLabel = document.createElement('h3');
+        filterLabel.innerText = 'Filter relationships';
+        relationshipBrowser.appendChild(filterLabel);
+
+        const filterInput = document.createElement('input');
+        filterInput.type = 'text';
+        filterInput.style.maxWidth = '500px';
+        relationshipBrowser.appendChild(filterInput);
+
+        const relationshipsDiv = document.createElement('div');
+        relationshipBrowser.appendChild(relationshipsDiv);
+
+        filterInput.oninput = () => {
+            relationshipsDiv.innerText = '';
+            updateRelationshipBrowserContents(relationshipsDiv, relationships, filterInput.value, logicalName);
+        };
+
+        updateRelationshipBrowserContents(relationshipsDiv, relationships, null, logicalName);
     }
 
-    function updateRelationshipBrowserContents(relationshipBrowser, relationships, optionalFilter, logicalName) {
+    function updateRelationshipBrowserContents(container, relationships, optionalFilter, logicalName) {
         let manyToMany = relationships.ManyToManyRelationships
         let oneToMany = relationships.OneToManyRelationships;
+        let manyToOne = relationships.ManyToOneRelationships;
 
         if (optionalFilter != null && optionalFilter !== '') {
             optionalFilter = optionalFilter.toLowerCase();
@@ -2144,8 +2169,17 @@
                 r.SchemaName?.toLowerCase()?.includes(optionalFilter)
             );
 
-
             oneToMany = oneToMany.filter(r =>
+                r.ReferencedAttribute?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencedEntity?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencingAttribute?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencingEntity?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencedEntityNavigationPropertyName?.toLowerCase()?.includes(optionalFilter) ||
+                r.ReferencingEntityNavigationPropertyName?.toLowerCase()?.includes(optionalFilter) ||
+                r.SchemaName?.toLowerCase()?.includes(optionalFilter)
+            );
+
+            manyToOne = manyToOne.filter(r =>
                 r.ReferencedAttribute?.toLowerCase()?.includes(optionalFilter) ||
                 r.ReferencedEntity?.toLowerCase()?.includes(optionalFilter) ||
                 r.ReferencingAttribute?.toLowerCase()?.includes(optionalFilter) ||
@@ -2158,22 +2192,29 @@
 
         const manyToManyHeader = document.createElement('h2');
         manyToManyHeader.innerText = 'Many to Many Relationships';
-        relationshipBrowser.appendChild(manyToManyHeader);
+        container.appendChild(manyToManyHeader);
 
         for (let relationship of manyToMany) {
-            createRelationshipElementForManyToMany(relationship, logicalName, relationshipBrowser);
+            createRelationshipElementForManyToMany(relationship, logicalName, container);
+        }
+
+        const manyToOneHeader = document.createElement('h2');
+        manyToOneHeader.innerText = 'Many to One Relationships (lookups)';
+        container.appendChild(manyToOneHeader);
+
+        for (let relationship of manyToOne) {
+            createRelationshipElementForManyToOne(relationship, logicalName, container);
         }
 
         const oneToManyHeader = document.createElement('h2');
         oneToManyHeader.innerText = 'One to Many Relationships';
-        relationshipBrowser.appendChild(oneToManyHeader);
+        container.appendChild(oneToManyHeader);
 
         for (let relationship of oneToMany) {
-            createRelationshipElementForOneToMany(relationship, logicalName, relationshipBrowser);
+            createRelationshipElementForOneToMany(relationship, logicalName, container);
         }
 
-        relationshipBrowser.style.display = 'grid';
-
+        container.style.display = 'grid';
     }
 
     function createRelationshipElementForManyToMany(relationship, logicalName, container) {
@@ -2184,11 +2225,32 @@
         } else if (relationship.Entity2LogicalName === logicalName) {
             navigationProperty = relationship.Entity2NavigationPropertyName;
         } else {
-            alert(`Could find the navigation property for relationship ${relationship.SchemaName}`);
+            alert(`Could find the navigation property for many to many relationship ${relationship.SchemaName}`);
             return;
         }
 
-        const link = createRelationshipLink(navigationProperty, relationship.SchemaName);
+        const link = createRelationshipLink(navigationProperty);
+        container.appendChild(link);
+    }
+
+    function createRelationshipElementForManyToOne(relationship, logicalName, container) {
+        let navigationProperty = null;
+
+        if (relationship.ReferencingEntity === logicalName) {
+            navigationProperty = relationship.ReferencingEntityNavigationPropertyName;
+        } else {
+            alert(`Could find the navigation property for many to one relationship '${relationship.SchemaName}'`);
+            return;
+        }
+
+        const link = createRelationshipLink(navigationProperty);
+
+        if (window.originalResponseCopy['_' + navigationProperty + '_value'] == null) {
+            link.href = 'javascript:'
+            link.style['text-decoration'] = 'none';
+            link.style['pointer-events'] = 'none';
+        }
+
         container.appendChild(link);
     }
 
@@ -2198,21 +2260,21 @@
         if (relationship.ReferencedEntity === logicalName) {
             navigationProperty = relationship.ReferencedEntityNavigationPropertyName;
         } else {
-            alert(`Could find the navigation property for relationship '${relationship.SchemaName}'`);
+            alert(`Could find the navigation property for one to many relationship '${relationship.SchemaName}'`);
             return;
         }
 
-        const link = createRelationshipLink(navigationProperty, relationship.SchemaName);
+        const link = createRelationshipLink(navigationProperty);
         container.appendChild(link);
     }
 
-    function createRelationshipLink(navigationProperty, innerText) {
+    function createRelationshipLink(navigationProperty) {
         const element = document.createElement('a');
         element.target = '_blank';
         element.style.margin = '4px 0px';
         element.style.width = 'fit-content';
         element.href = window.location.pathname + '/' + navigationProperty + '#pr';
-        element.innerText = innerText;
+        element.innerText = navigationProperty;
         return element;
     }
 
