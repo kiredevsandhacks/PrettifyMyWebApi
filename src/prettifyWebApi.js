@@ -293,7 +293,7 @@
         }
 
         if (relations.length != 1) {
-            alert(`Something went wrong with retrieving the navigation property for ${currentRecordLogicalName}/${lookupEntitylogicalName}/${fieldName}: ${relations.length} entities found. This should not happen.`);
+            alert(`Something went wrong with retrieving the navigation property for ${currentRecordLogicalName}/${lookupEntitylogicalName}/${fieldName}: ${relations.length} relations found. This should not happen.`);
             return null;
         }
 
@@ -2305,7 +2305,7 @@
         // 'manually' add this in, because we want to be able to see this
         // it's not listed as creatable, but it actually is
         jsonObject['statecode'] = null;
-        debugger
+        
         await prettifyWebApi(jsonObject, document.body, window.currentEntityPluralName, false, true);
         await editRecord(logicalName, window.currentEntityPluralName, null, true);
     }
@@ -2756,6 +2756,12 @@
                 margin:0px;
             }
 
+            .panel {
+                padding:10px;
+                margin:0px;
+                text-wrap:nowrap;
+            }
+
             .bodyPreviewed {
                 display: inline-flex;
                 margin-top: 0px;
@@ -2763,7 +2769,7 @@
             }
 
             .prePreviewed {
-                width: 49vw;
+                width: 48vw;
                 overflow-x: scroll;
                 overflow-y: scroll;
                 height: 100%;
