@@ -2389,7 +2389,9 @@
         }
         const selects = document.getElementsByTagName('select');
         for (let i = 0; i < selects.length; i++) {
-            selects[i].disabled = false;
+            if (selects[i].dataset.fieldname !== 'statecode') {
+                selects[i].disabled = false;
+            }
         }
         const textareas = document.getElementsByTagName('textarea');
         for (let i = 0; i < textareas.length; i++) {
