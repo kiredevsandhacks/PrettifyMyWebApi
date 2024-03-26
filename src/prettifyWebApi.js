@@ -35,6 +35,8 @@
 
     let allPluralNames = null;
 
+    const foundNavigationProperties = [];
+
     async function odataFetch(url) {
         const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
 
@@ -542,6 +544,8 @@
                 const formattedValueValue = ordered[key + formattedValueType];
                 const navigationPropertyValue = ordered[key + navigationPropertyType];
                 const lookupTypeValue = ordered[key + lookupType];
+
+                foundNavigationProperties.push(navigationPropertyValue);
 
                 const newApiUrl = await generateApiAnchorAsync(lookupTypeValue, value);
                 const formUrl = generateFormUrlAnchor(lookupTypeValue, value);
@@ -2254,7 +2258,7 @@
 
         const link = createRelationshipLink(navigationProperty);
 
-        if (window.originalResponseCopy['_' + navigationProperty + '_value'] == null) {
+        if (window.originalResponseCopy['_' + navigationProperty + '_value'] == null && foundNavigationProperties.find(n => n == navigationProperty) == null) {
             link.href = 'javascript:'
             link.style['text-decoration'] = 'none';
             link.style['pointer-events'] = 'none';
@@ -2305,7 +2309,7 @@
         // 'manually' add this in, because we want to be able to see this
         // it's not listed as creatable, but it actually is
         jsonObject['statecode'] = null;
-        
+
         await prettifyWebApi(jsonObject, document.body, window.currentEntityPluralName, false, true);
         await editRecord(logicalName, window.currentEntityPluralName, null, true);
     }
