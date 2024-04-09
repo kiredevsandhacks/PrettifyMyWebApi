@@ -472,7 +472,7 @@
         fieldname = fieldname.substring(1, fieldname.length - 1).substring(0, fieldname.length - 7);
 
         const formattedGuid = guid?.replace('{', '')?.replace('}', '');
-        return `<div class='lookupEditLinks' style='display:none;' data-fieldname='${escapeHtml(fieldname)}'><span class='link'>   <a href='javascript:' class='searchDifferentRecord lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Edit lookup</a></span><span class='link'>   <a href='javascript:' class='clearLookup lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Clear lookup</a></span><span class='link'>   <a href='javascript:' class='cancelLookupEdit lookupEditLink' data-fieldname='${escapeHtml(fieldname)}' style='display:none;'>Undo changes</a></span></div><span class='lookupEdit' style='display: none;'><div class='inputContainer containerNotEnabled' data-name='${escapeHtml(displayName)}' data-id='${escapeHtml(formattedGuid)}' data-fieldname='${escapeHtml(fieldname)}' data-lookuptype='${escapeHtml(lookupTypeValue)}'></div></span>`;
+        return `<div class='lookupEditLinks' style='display:none;' data-fieldname='${escapeHtml(fieldname)}'><span class='pf-link'>   <a href='javascript:' class='searchDifferentRecord lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Edit lookup</a></span><span class='pf-link'>   <a href='javascript:' class='clearLookup lookupEditLink' data-fieldname='${escapeHtml(fieldname)}'>Clear lookup</a></span><span class='pf-link'>   <a href='javascript:' class='cancelLookupEdit lookupEditLink' data-fieldname='${escapeHtml(fieldname)}' style='display:none;'>Undo changes</a></span></div><span class='lookupEdit' style='display: none;'><div class='inputContainer containerNotEnabled' data-name='${escapeHtml(displayName)}' data-id='${escapeHtml(formattedGuid)}' data-fieldname='${escapeHtml(fieldname)}' data-lookuptype='${escapeHtml(lookupTypeValue)}'></div></span>`;
     }
 
     function createdFormattedValueSpan(cls, value, fieldName, formattedValue) {
@@ -554,9 +554,9 @@
                 let lookupFormatted = '';
 
                 lookupFormatted += `<span class='lookupDisplay'>{<br>   ` + spaces +
-                    createLinkSpan('link', newApiUrl) + ' - ' +
-                    createLinkSpan('link', formUrl) + ' - ' +
-                    createLinkSpan('link', previewUrl);
+                    createLinkSpan('pf-link', newApiUrl) + ' - ' +
+                    createLinkSpan('pf-link', formUrl) + ' - ' +
+                    createLinkSpan('pf-link', previewUrl);
                 lookupFormatted += '<br>   '
                 lookupFormatted += spaces + createSpan(determineType(formattedValueValue), 'Name: ' + formattedValueValue);
                 lookupFormatted += '<br>   '
@@ -606,22 +606,22 @@
         const newObj = {};
         if (!isNested) {
             if (logicalName != null && logicalName !== '' && recordId != null && recordId !== '') {
-                newObj['Form Link'] = createLinkSpan('link', generateFormUrlAnchor(logicalName, recordId));
+                newObj['Form Link'] = createLinkSpan('pf-link', generateFormUrlAnchor(logicalName, recordId));
 
                 if (isSingleRecord) {
-                    newObj['Edit this row'] = createLinkSpan('link', await generateEditMenu(logicalName, recordId, false));
-                    newObj['Delete this row'] = createLinkSpan('link', await generateDeleteAnchor(logicalName, recordId, isSingleRecord));
+                    newObj['Edit this row'] = createLinkSpan('pf-link', await generateEditMenu(logicalName, recordId, false));
+                    newObj['Delete this row'] = createLinkSpan('pf-link', await generateDeleteAnchor(logicalName, recordId, isSingleRecord));
                 } else {
-                    newObj['Web Api Link'] = createLinkSpan('link', generateWebApiAnchor(recordId, pluralName));
+                    newObj['Web Api Link'] = createLinkSpan('pf-link', generateWebApiAnchor(recordId, pluralName));
                 }
 
                 if (relationShipDefinition != null) {
                     if (window.isManyToOneContext) {
-                        newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, relationShipDefinition.ReferencingEntityNavigationPropertyName, 'ManyToOne'));
+                        newObj['Disassociate this row'] = createLinkSpan('pf-link', generateDisassociateAnchor(pluralName, recordId, relationShipDefinition.ReferencingEntityNavigationPropertyName, 'ManyToOne'));
                     } else if (relationShipDefinition.RelationshipType === 1) {
-                        newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, '', 'ManyToMany'));
+                        newObj['Disassociate this row'] = createLinkSpan('pf-link', generateDisassociateAnchor(pluralName, recordId, '', 'ManyToMany'));
                     } else if (relationShipDefinition.RelationshipType === 0) {
-                        newObj['Disassociate this row'] = createLinkSpan('link', generateDisassociateAnchor(pluralName, recordId, relationShipDefinition.ReferencingEntityNavigationPropertyName, 'OneToMany',));
+                        newObj['Disassociate this row'] = createLinkSpan('pf-link', generateDisassociateAnchor(pluralName, recordId, relationShipDefinition.ReferencingEntityNavigationPropertyName, 'OneToMany',));
                     }
                 }
             } else if (!isSingleColumnValueOnly && !isCreateMode && logicalName != null && logicalName !== '' && (recordId == null || recordId === '')) {
@@ -631,7 +631,7 @@
         }
 
         if (isCreateMode) {
-            newObj['Create new row'] = createLinkSpan('link', await generateEditMenu(logicalName, recordId, true));
+            newObj['Create new row'] = createLinkSpan('pf-link', await generateEditMenu(logicalName, recordId, true));
         }
 
         const combinedJsonObj = Object.assign(newObj, ordered);
@@ -2526,8 +2526,8 @@
 
     async function makeItPretty() {
         if (checkIfJsonViewerEnabled()) {
-            document.body.innerText = 'It seems you have Edge JSON Viewer enabled. This extension is not compatible with Edge JSON Viewer. Navigate to edge://flags/#edge-json-viewer to disable.';
-            return;
+            //    document.body.innerText = 'It seems you have Edge JSON Viewer enabled. This extension is not compatible with Edge JSON Viewer. Navigate to edge://flags/#edge-json-viewer to disable.';
+            //  return;
         }
 
         if (window.location.hash === '#pf') {
@@ -2556,6 +2556,11 @@
         };
 
         document.body.appendChild(transParentOverlay);
+
+        // do this for Edge, who overrides our styles
+        for (var panel of document.getElementsByClassName('panel')) {
+            panel.style.display = 'block';
+        }
     }
 
     function clearCss() {
@@ -2570,6 +2575,25 @@
         clearCss();
 
         const css = `
+            body {
+                font-size: 13px !important;
+            }
+
+            button {
+                font-family: Arial !important;
+                font-size: 13px !important;
+            }
+
+            select {
+                font-family: Arial !important;
+                font-size: 13px !important;
+            }
+
+            input {
+                font-family: Arial !important;
+                font-size: 13px !important;
+            }
+
             .multiSelectInput {
                 width: auto !important;
                 margin: 4px 8px 4px 4px !important;
@@ -2630,7 +2654,7 @@
             .boolean { color: blue; }
             .null { color: magenta; }
             .guid { color: firebrick; }
-            .link { color: blue; }
+            .pf-link { color: blue; }
             .primarykey { color: tomato; }
 
             @media (prefers-color-scheme: dark) {
@@ -2649,7 +2673,7 @@
             .boolean { color: #5bd75b; }
             .null { color: #ae82eb; }
             .guid { color: #5cc3ed; }
-            .link { color: lightblue; }
+            .pf-link { color: lightblue; }
             .primarykey { color: tomato; }
             
             body { 
@@ -2674,7 +2698,6 @@
                 .panel input {
                     background: #131313;
                     border-color: #18181a;
-                    height: 14px;
                 }    
             }
 
@@ -2700,7 +2723,7 @@
                 }  
             }
 
-            .panel span:not(.lookupField):not(.lookupEdit):not(.link) {
+            .panel span:not(.lookupField):not(.lookupEdit):not(.pf-link) {
                 margin-right: 24px;
                 padding-right: 16px;
             }
@@ -2766,6 +2789,7 @@
                 padding:10px;
                 margin:0px;
                 text-wrap:nowrap;
+                display:block;
             }
 
             .bodyPreviewed {
@@ -2776,8 +2800,8 @@
 
             .prePreviewed {
                 width: 48vw;
-                overflow-x: scroll;
-                overflow-y: scroll;
+                overflow-x: scroll !important;
+                overflow-y: scroll !important;
                 height: 100%;
                 margin: 0px;
             }
