@@ -983,6 +983,11 @@
         input.value = value;
 
         setInputMetadata(input, container, datatype);
+
+        // in some very rare cases, dataverse will return an empty string instead of null 
+        if (value === '') {
+            input.dataset.isEmptyString = 'true';
+        }
     }
 
     function createMultiSelectOptionSetValueInput(container, optionSet) {
@@ -1065,27 +1070,31 @@
             selectHtml = "<option value='null'>null</option>"; // empty option for clearing it
         }
 
-        let cachedValue;
+        let mappedValue = null;
 
         optionSet.forEach(function (option) {
-            const formattedOption = option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label;
+            let formattedEscapedOption = escapeHtml(option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label);
             if (value === option.Value) {
-                cachedValue = formattedOption;
+                mappedValue = formattedEscapedOption;
             }
 
             // TODO: refactor the value attribute to contain the pure values, true/false/null
             if (option.State || option.State === 0) {
-                selectHtml += `<option data-state='${escapeHtml(option.State)}' value='${escapeHtml(formattedOption)}'>${escapeHtml(formattedOption)}</option>`;
+                selectHtml += `<option data-state='${escapeHtml(option.State)}' value='${formattedEscapedOption}'>${formattedEscapedOption}</option>`;
             } else {
-                selectHtml += `<option value='${escapeHtml(formattedOption)}'>${escapeHtml(formattedOption)}</option>`;
+                selectHtml += `<option value='${formattedEscapedOption}'>${formattedEscapedOption}</option>`;
             }
         });
 
+        if (mappedValue == null && value != null) {
+            let formattedEscapedOption = escapeHtml(value + ' : (unmapped)');
+            selectHtml += `<option data-state='${escapeHtml(value)}' value='${formattedEscapedOption}'>${formattedEscapedOption}</option>`;
+            mappedValue = formattedEscapedOption;
+        }
+
         select.innerHTML = selectHtml;
 
-        if (cachedValue) {
-            select.value = cachedValue;
-        }
+        select.value = mappedValue;
 
         setInputMetadata(select, container, 'option');
 
@@ -1586,7 +1595,7 @@
 
             let value = '';
             if (dataType === 'string' || dataType === 'memo' || dataType === 'uid') {
-                if (inputValue === '') {
+                if (inputValue === '' && input.dataset.isEmptyString !== 'true') {
                     value = null;
                 } else {
                     value = inputValue;
@@ -1883,6 +1892,27 @@
 
 
     function createMonacoEditorControls(mainPanel, recordId) {
+        if (checkIfJsonViewerEnabled()) {
+            const btn = document.createElement('button');
+            btn.style = `
+                height: 30px;
+                width: auto;
+                margin-right: 160px;
+                margin-top: 10px;
+                position: absolute;
+                right: 10px;
+                padding:0;
+                font-size:24;
+                padding: 0px 4px;
+                disabled;
+                `
+            btn.innerHTML = '<div>Currently, editing Flows is only possible in Chrome. Work in progress.</div>';
+            btn.setAttribute('disabled', 'true');
+
+            mainPanel.prepend(btn);
+            return;
+        }
+
         mainPanel.dataset.chromeRuntimeUrl = chrome.runtime.getURL('');
         mainPanel.dataset.flowName = originalResponseCopy.name;
         mainPanel.dataset.recordId = recordId;
@@ -2525,11 +2555,6 @@
     }
 
     async function makeItPretty() {
-        if (checkIfJsonViewerEnabled()) {
-            //    document.body.innerText = 'It seems you have Edge JSON Viewer enabled. This extension is not compatible with Edge JSON Viewer. Navigate to edge://flags/#edge-json-viewer to disable.';
-            //  return;
-        }
-
         if (window.location.hash === '#pf') {
             document.body.innerText = 'Loading your flow...';
         }
