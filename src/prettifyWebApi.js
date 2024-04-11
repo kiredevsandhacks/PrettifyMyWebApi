@@ -2589,6 +2589,11 @@
                 font-size: 13px !important;
             }
 
+            textarea {
+                font-family: Arial !important;
+                font-size: 13px !important;
+            }
+
             input {
                 font-family: Arial !important;
                 font-size: 13px !important;
