@@ -1094,7 +1094,9 @@
 
         select.innerHTML = selectHtml;
 
-        select.value = mappedValue;
+        if (mappedValue != null) {
+            select.value = mappedValue;
+        }
 
         setInputMetadata(select, container, 'option');
 
