@@ -1073,9 +1073,10 @@
         let mappedValue = null;
 
         optionSet.forEach(function (option) {
-            let formattedEscapedOption = escapeHtml(option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label);
+            let formattedOption = option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label;
+            let formattedEscapedOption = escapeHtml(formattedOption);
             if (value === option.Value) {
-                mappedValue = formattedEscapedOption;
+                mappedValue = formattedOption;
             }
 
             // TODO: refactor the value attribute to contain the pure values, true/false/null
@@ -1087,9 +1088,10 @@
         });
 
         if (mappedValue == null && value != null) {
-            let formattedEscapedOption = escapeHtml(value + ' : (unmapped)');
+            let formattedOption = value + ' : (unmapped)';
+            let formattedEscapedOption = escapeHtml(formattedOption);
             selectHtml += `<option data-state='${escapeHtml(value)}' value='${formattedEscapedOption}'>${formattedEscapedOption}</option>`;
-            mappedValue = formattedEscapedOption;
+            mappedValue = formattedOption;
         }
 
         select.innerHTML = selectHtml;
