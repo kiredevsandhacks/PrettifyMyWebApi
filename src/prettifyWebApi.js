@@ -10,9 +10,15 @@
     const replacedQuote = '__~~__REPLACEDQUOTE__~~__';
     const replacedComma = '__~~__REPLACEDCOMMA__~~__';
 
-    const clipBoardIcon = `<svg style='width:16px;position:absolute' viewBox='0 0 24 24'>
-        <path fill='currentColor' d='M19,3H14.82C14.25,1.44 12.53,0.64 11,1.2C10.14,1.5 9.5,2.16 9.18,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M12,3A1,1 0 0,1 13,4A1,1 0 0,1 12,5A1,1 0 0,1 11,4A1,1 0 0,1 12,3M7,7H17V5H19V19H5V5H7V7M17,11H7V9H17V11M15,15H7V13H15V15Z' />
+    const clipBoardIcon = `<svg class='copyIcon' style='width:16px;position:absolute;padding-left:4px' viewBox='0 0 24 24'>
+        <path fill='currentColor' d='M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1s-1-.45-1-1s.45-1 1-1zm7 18H5V4h2v3h10V4h2v16z'/>
     </svg>`.replaceAll(',', replacedComma); // need to 'escape' the commas because they cause issues with the JSON string cleanup code 
+
+    const clipBoardIconCopied = `<svg class='copiedIcon' style='width:16px;position:absolute;display:none;padding-left:4px' viewBox='0 0 24 24'>
+        <path fill='currentColor' d='M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1s-1-.45-1-1s.45-1 1-1zm-2 14l-4-4l1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z'/>
+    </svg>`.replaceAll(',', replacedComma); // need to 'escape' the commas because they cause issues with the JSON string cleanup code 
+
+    const copyControlsHtml = `<span class='copyButton'>` + clipBoardIcon + `</span>` + `<span class='copiedNotification' style='display:none'>` + clipBoardIconCopied + `<span style='padding-left:24px'>Copied!</span></span>`;
 
     let apiUrl = '';
     let titleSet = false;
@@ -448,11 +454,11 @@
     }
 
     function createSpan(cls, value) {
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}${copyControlsHtml}</span>`;
     }
 
     function createSpanForLookup(cls, value) {
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field lookupField'>${escapeHtml(value)}<span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field lookupField'>${escapeHtml(value)}${copyControlsHtml}</span>`;
     }
 
     function createLinkSpan(cls, value) {
@@ -461,7 +467,7 @@
     }
 
     function createFieldSpan(cls, value, fieldName) {
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(value)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div>${copyControlsHtml}</span>`;
     }
 
     function createLookupEditField(displayName, guid, fieldname, lookupTypeValue) {
@@ -485,7 +491,7 @@
             insertedValue = value;
         }
 
-        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div><span class='copyButton'>` + clipBoardIcon + `</span></span>`;
+        return `<span style='display: inline-flex;' class='${escapeHtml(cls)} field'>${escapeHtml(insertedValue)}<div class='inputContainer containerNotEnabled' style='display: none;' data-fieldname='${escapeHtml(fieldName)}'></div>${copyControlsHtml}</span>`;
     }
 
     async function enrichObjectWithHtml(jsonObj, logicalName, pluralName, primaryIdAttribute, isSingleRecord, isNested, nestedLevel, primaryNameAttribute, isCreateMode, relationShipDefinition, isSingleColumnValueOnly) {
@@ -661,8 +667,21 @@
     }
 
     function setCopyToClipboardHandlers() {
-        Array.from(document.querySelectorAll('.copyButton')).forEach((el) => el.onclick = (element) => {
-            navigator.clipboard.writeText(el.parentElement.innerText).then(() => {
+        Array.from(document.querySelectorAll('.field')).forEach((el) => el.onclick = (element) => {
+            navigator.clipboard.writeText(el.innerText).then(() => {
+                const copyIcon = el.querySelector('.copyIcon');
+                const copiedIcon = el.querySelector('.copiedIcon');
+                const copiedNotification = el.querySelector('.copiedNotification');
+                copiedNotification.style.display = 'unset';
+                copiedIcon.style.display = 'unset';
+                copyIcon.style.display = 'none';
+
+                setTimeout(() => {
+                    copiedNotification.style.display = 'none';
+                    copiedIcon.style.display = 'none';
+                    copyIcon.style.display = 'unset';
+                }, 1000);
+
                 console.log('Content copied to clipboard');
             }, () => {
                 alert('Failed to copy');
@@ -1189,7 +1208,7 @@
         editMenuDiv.classList.add('lookupEditMenuDiv');
 
         const selectTableDiv = document.createElement('div');
-        selectTableDiv.append('      table: ');
+        selectTableDiv.append('      Table: ');
         selectTableDiv.append(selectTable);
 
         editMenuDiv.append(selectTableDiv);
@@ -1229,6 +1248,7 @@
 
         setLookupQueryByIdHandlers(input, lookupQueryResultPreview, selectTable);
         return;
+
         // there is logic here for querying records. 
         // Not enabled for now as it's complicated and very hard to give a great user experience
 
@@ -1236,7 +1256,7 @@
         const queryInput = document.createElement('input');
 
         const queryDiv = document.createElement('div');
-        queryDiv.append('      query: ');
+        queryDiv.append('      Search text: ');
         queryDiv.append(queryInput);
         editMenuDiv.append(queryDiv);
 
@@ -1246,14 +1266,14 @@
 
         const resultsSelect = document.createElement('select');
         const resultsDiv = document.createElement('div');
-        resultsDiv.append('      query results:');
+        resultsDiv.append('      Search results:');
         resultsDiv.append(resultsSelect);
 
-        resultsSelect.dataset.id = id;
-        resultsSelect.dataset.originalid = id;
-        resultsSelect.dataset.originalname = name;
-        resultsSelect.dataset.originalNavigationProperty = navigationProperty;
-        resultsSelect.dataset.originalLookupType = lookupType;
+        // resultsSelect.dataset.id = id;
+        // resultsSelect.dataset.originalid = id;
+        // resultsSelect.dataset.originalname = name;
+        // resultsSelect.dataset.originalNavigationProperty = 'test123';
+        // resultsSelect.dataset.originalLookupType = lookupType;
 
         const selectFilterFieldDefault = document.createElement('option');
         selectFilterFieldDefault.value = '_primary';
@@ -1263,7 +1283,7 @@
         editMenuDiv.append(resultsDiv);
 
         const selectFilterFieldDiv = document.createElement('div');
-        selectFilterFieldDiv.append('      field to query: ');
+        selectFilterFieldDiv.append('      Search by: ');
         selectFilterFieldDiv.append(selectFilterField);
         editMenuDiv.append(selectFilterFieldDiv);
 
@@ -1371,7 +1391,7 @@
         input.dataset.fieldname = container.dataset.fieldname;
         input.dataset.datatype = 'lookup';
 
-        editMenuDiv.append('      record id:');
+        editMenuDiv.append('      Row id:');
         editMenuDiv.appendChild(input);
 
         container.parentElement.append(editMenuDiv);
@@ -2019,7 +2039,7 @@
                 }
                 titleSet = true;
             }
-            const valueKeyWithCount = 'value (' + jsonObj.value.length + ' records)';
+            const valueKeyWithCount = 'value (' + jsonObj.value.length + ' rows)';
 
             jsonObj[valueKeyWithCount] = jsonObj.value;
             delete jsonObj.value;
@@ -2757,7 +2777,7 @@
                 }  
             }
 
-            .panel span:not(.lookupField):not(.lookupEdit):not(.pf-link) {
+            .panel span:not(.lookupField):not(.lookupEdit):not(.pf-link):not(.copiedNotification):not(.copyButton) {
                 margin-right: 24px;
                 padding-right: 16px;
             }
@@ -2770,21 +2790,18 @@
                 color:dimgray;
                 display: none;
                 cursor: pointer;
-            }           
+            }  
+            
+            .field  {
+                cursor: pointer;
+            }    
             
             .panel .field:hover .copyButton {
                 display: unset;
-            }
+            }      
 
-            .panel .copyButton:active {
-                color: darkgreen;
-            }             
 
             @media (prefers-color-scheme: dark) {
-                .panel .copyButton:active {
-                    color: #5bd75b;
-                }
-
                 .panel .copyButton {
                     color:darkgray;
                 }       
