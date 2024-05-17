@@ -680,7 +680,7 @@
                     copiedNotification.style.display = 'none';
                     copiedIcon.style.display = 'none';
                     copyIcon.style.display = 'unset';
-                }, 1000);
+                }, 1400);
 
                 console.log('Content copied to clipboard');
             }, () => {
