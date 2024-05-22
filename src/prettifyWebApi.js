@@ -668,6 +668,9 @@
 
     function setCopyToClipboardHandlers() {
         Array.from(document.querySelectorAll('.field')).forEach((el) => el.onclick = (element) => {
+            if (window.pfwaMode !== 'read') {
+                return;
+            }
             navigator.clipboard.writeText(el.innerText).then(() => {
                 const copyIcon = el.querySelector('.copyIcon');
                 const copiedIcon = el.querySelector('.copiedIcon');
@@ -680,7 +683,7 @@
                     copiedNotification.style.display = 'none';
                     copiedIcon.style.display = 'none';
                     copyIcon.style.display = 'unset';
-                }, 1400);
+                }, 400);
 
                 console.log('Content copied to clipboard');
             }, () => {
@@ -1446,6 +1449,8 @@
     }
 
     async function editRecord(logicalName, pluralName, id, isCreateMode) {
+        window.pfwaMode = isCreateMode ? 'create' : 'edit';
+
         const editLink = document.getElementsByClassName('editLink')[0];
         editLink.style.display = 'none';
 
@@ -1956,6 +1961,8 @@
     }
 
     async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview, isCreateMode) {
+        window.pfwaMode = isCreateMode ? 'create' : 'read';
+
         const isMultiple = (jsonObj.value && Array.isArray(jsonObj.value));
         const isSingleColumnValueOnly = Object.keys(jsonObj).length === 2 && jsonObj['@odata.context'] && jsonObj.value;
 
