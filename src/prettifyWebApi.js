@@ -441,10 +441,11 @@
         return `
 <a class='editLink' data-logicalName='${escapeHtml(logicalName)}' data-pluralName='${escapeHtml(pluralName)}' data-guid='${escapeHtml(formattedGuid)}' href='javascript:'>Edit this row</a>     
     <div class='editMenuDiv' style='display: none;'>
-        <div class='checkBoxDiv'>    Bypass Custom Plugin Execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'>
-        </div><div class='checkBoxDiv'>    Bypass Power Automate Flow Execution<input class='bypassFlowExecutionBox' type='checkbox' style='width:25px;'>
+        <div class='checkBoxDiv'>    Bypass Custom Plugin execution<input class='bypassPluginExecutionBox' type='checkbox' style='width:25px;'>
+        </div><div class='checkBoxDiv'>    Bypass Power Automate Flow execution<input class='bypassFlowExecutionBox' type='checkbox' style='width:25px;'>
         </div><div class='checkBoxDiv'>    Preview changes before committing save<input class='previewChangesBeforeSavingBox' type='checkbox' style='width:25px;' checked='true'>
         </div><div class='checkBoxDiv'>    Impersonate another user<input class='impersonateAnotherUserCheckbox' type='checkbox' style='width:25px;'>
+        </div><div class='checkBoxDiv'>    Remember these settings (for this environment)<input id='saveSettingsInput' type='checkbox' style='width:25px;'>
         </div><div class='impersonateDiv' style='display:none;'><div>      Base impersonation on this field: <select  class='impersonateAnotherUserSelect'><option value='systemuserid'>systemuserid</option><option value='azureactivedirectoryobjectid'>azureactivedirectoryobjectid</option></select>  <i><a href='https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user' target='_blank'>What's this?</a></i>
         </div><div>      <span class='impersonationIdFieldLabel'>systemuserid:</span><input class='impersonateAnotherUserInput' placeholder='00000000-0000-0000-0000-000000000000'>  <span class='impersonateUserPreview'></span>
         </div></div><div><div id='previewChangesDiv'></div>    <a class='cancelLink' href='javascript:'>Cancel</a><br/>    <a class='submitLink' style='display: none;' href='javascript:'>Save</a>
@@ -1596,6 +1597,51 @@
         document.querySelectorAll('.lookupDisplay').forEach((el) => {
             el.style.display = 'none';
         });
+
+        applySettings();
+    }
+
+
+    function applySettings() {
+        try {
+            const savedSettings = JSON.parse(localStorage.getItem('pfwaSettings'));
+            if (savedSettings) {
+                document.getElementById('saveSettingsInput').checked = true;
+                const impersonateAnotherUserCheckbox = document.getElementsByClassName('impersonateAnotherUserCheckbox')[0];
+                const impersonateAnotherUserField = document.getElementsByClassName('impersonateAnotherUserSelect')[0];
+                const impersonateAnotherUserInput = document.getElementsByClassName('impersonateAnotherUserInput')[0];
+
+                if (savedSettings.CallerObjectId) {
+                    impersonateAnotherUserField.value = 'azureactivedirectoryobjectid';
+                    impersonateAnotherUserCheckbox.click();
+                    impersonateAnotherUserInput.value = savedSettings.CallerObjectId;
+                } else if (savedSettings.MSCRMCallerID) {
+                    impersonateAnotherUserField.value = 'systemuserid';
+                    impersonateAnotherUserCheckbox.click();
+                    impersonateAnotherUserInput.value = savedSettings.MSCRMCallerID;
+                }
+
+                if (savedSettings.bypassCustomPluginExecution) {
+                    const bypassCustomPluginExecution = document.getElementsByClassName('bypassPluginExecutionBox')[0];
+                    bypassCustomPluginExecution.checked = true;
+                }
+
+                if (savedSettings.bypassFlowExecution) {
+                    const bypassFlowExecution = document.getElementsByClassName('bypassFlowExecutionBox')[0];
+                    bypassFlowExecution.checked = true;
+                }
+
+                const previewChangesBeforeSaving = document.getElementsByClassName('previewChangesBeforeSavingBox')[0];
+
+                if (savedSettings.wasPreviewEnabled) {
+                    previewChangesBeforeSaving.checked = true;
+                } else {
+                    previewChangesBeforeSaving.checked = false;
+                }
+            }
+        } catch {
+            // ignore
+        }
     }
 
     function resetSubmitControls() {
@@ -1823,17 +1869,14 @@
             }
         }
 
-        const submitLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('submitLink')[0];
-        const cancelLink = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('cancelLink')[0];
-
         if (!!previewChangesBeforeSaving) {
             previewChanges(changedFields, pluralName, id, impersonateHeader, isCreateMode);
         } else {
-            await commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink, isCreateMode);
+            await commitSave(pluralName, id, changedFields, impersonateHeader, isCreateMode, false);
         }
     }
 
-    async function commitSave(pluralName, id, changedFields, impersonateHeader, cancelLink, submitLink, isCreateMode) {
+    async function commitSave(pluralName, id, changedFields, impersonateHeader, isCreateMode, wasPreviewEnabled) {
         let requestUrl = '';
         let method = '';
 
@@ -1860,7 +1903,6 @@
             headers['If-Match'] = '*'
         } else {
             headers['Prefer'] = 'return=representation'
-
         }
 
         headers = { ...headers, ...impersonateHeader }
@@ -1875,6 +1917,7 @@
             headers['MSCRM.SuppressCallbackRegistrationExpanderJob'] = true;
         }
 
+        saveSettings(impersonateHeader, bypassCustomPluginExecution, bypassFlowExecution, wasPreviewEnabled);
 
         const saveInProgressDiv = document.getElementsByClassName('saveInProgressDiv')[0];
         saveInProgressDiv.style.display = null;
@@ -1900,6 +1943,31 @@
             window.alert(`${response.status} - ${errorText}`);
 
             resetSubmitControls();
+        }
+    }
+
+    function saveSettings(impersonateHeader, bypassCustomPluginExecution, bypassFlowExecution, wasPreviewEnabled) {
+        try {
+            const saveSettings = document.getElementById('saveSettingsInput').checked;
+            if (!!saveSettings) {
+
+                let settings = impersonateHeader || {};
+                if (!!bypassCustomPluginExecution) {
+                    settings.bypassCustomPluginExecution = true;
+                }
+
+                if (!!bypassFlowExecution) {
+                    settings.bypassFlowExecution = true;
+                }
+
+                settings.wasPreviewEnabled = wasPreviewEnabled;
+
+                localStorage.setItem('pfwaSettings', JSON.stringify(settings));
+            } else {
+                localStorage.removeItem('pfwaSettings');
+            }
+        } catch {
+            // ignore
         }
     }
 
@@ -2435,7 +2503,7 @@
         const saveCallback = async function () {
             submitChangesLink.style.display = 'none';
             undoAllLink.style.display = 'none';
-            await commitSave(pluralName, id, changedFields, impersonateHeader, undoAllLink, submitChangesLink, isCreateMode);
+            await commitSave(pluralName, id, changedFields, impersonateHeader, isCreateMode, true);
         }
 
         submitChangesLink.onclick = saveCallback;
