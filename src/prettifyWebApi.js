@@ -1615,10 +1615,12 @@
                     impersonateAnotherUserField.value = 'azureactivedirectoryobjectid';
                     impersonateAnotherUserCheckbox.click();
                     impersonateAnotherUserInput.value = savedSettings.CallerObjectId;
+                    impersonateAnotherUserInput.dispatchEvent(new Event('input', { bubbles: true }));
                 } else if (savedSettings.MSCRMCallerID) {
                     impersonateAnotherUserField.value = 'systemuserid';
                     impersonateAnotherUserCheckbox.click();
                     impersonateAnotherUserInput.value = savedSettings.MSCRMCallerID;
+                    impersonateAnotherUserInput.dispatchEvent(new Event('input', { bubbles: true }));
                 }
 
                 if (savedSettings.bypassCustomPluginExecution) {
