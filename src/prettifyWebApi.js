@@ -672,26 +672,39 @@
             if (window.pfwaMode !== 'read') {
                 return;
             }
-            navigator.clipboard.writeText(el.innerText).then(() => {
-                const copyIcon = el.querySelector('.copyIcon');
-                const copiedIcon = el.querySelector('.copiedIcon');
-                const copiedNotification = el.querySelector('.copiedNotification');
-                copiedNotification.style.display = 'unset';
-                copiedIcon.style.display = 'unset';
-                copyIcon.style.display = 'none';
 
-                setTimeout(() => {
-                    copiedNotification.style.display = 'none';
-                    copiedIcon.style.display = 'none';
-                    copyIcon.style.display = 'unset';
-                }, 400);
+            // to prevent weird issues with innerText and double clicking
+            if (window.copyToClipBoardBusy) {
+                return;
+            }
 
-                console.log('Content copied to clipboard');
-            }, () => {
-                alert('Failed to copy');
-            });
-        }
-        );
+            try {
+                window.copyToClipBoardBusy = true;
+                navigator.clipboard.writeText(el.innerText).then(() => {
+                    const copyIcon = el.querySelector('.copyIcon');
+                    const copiedIcon = el.querySelector('.copiedIcon');
+                    const copiedNotification = el.querySelector('.copiedNotification');
+                    copiedNotification.style.display = 'unset';
+                    copiedIcon.style.display = 'unset';
+                    copyIcon.style.display = 'none';
+
+                    setTimeout(() => {
+                        copiedNotification.style.display = 'none';
+                        copiedIcon.style.display = 'none';
+                        copyIcon.style.display = 'unset';
+
+                        window.copyToClipBoardBusy = false;
+                    }, 400);
+
+                    console.log('Content copied to clipboard');
+                }, () => {
+                    window.copyToClipBoardBusy = false;
+                    alert('Failed to copy');
+                });
+            } catch {
+                window.copyToClipBoardBusy = false;
+            }
+        });
     }
 
     function setPreviewLinkClickHandlers() {
