@@ -95,7 +95,7 @@
     function injectNotificationElement() {
 
         // pmwa-notification already injected
-        if (document.getElementById('pmwa-notificatio-notification')) { return; }
+        if (document.getElementById('pmwa-notification')) { return; }
 
         // Create a new style element
         var styleElement = document.createElement('style');
