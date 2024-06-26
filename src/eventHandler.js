@@ -146,7 +146,7 @@
 				}
 
 			} catch (e) {
-				alert(`Please open a form to use PrettifyMyWebApi`);
+				alert(`Please open a form or view to use PrettifyMyWebApi`);
 				return;
 			}
 		}
@@ -154,7 +154,7 @@
 		//in case we are not on form or on view
 		if (!window.Xrm.Page.data || !window.Xrm.Page.data.entity) {
 
-			alert(`Please open a form to use PrettifyMyWebApi`);
+			alert(`Please open a form or view to use PrettifyMyWebApi`);
 			return;
 		}
 
