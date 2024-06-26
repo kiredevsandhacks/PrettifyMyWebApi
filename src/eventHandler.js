@@ -95,15 +95,17 @@
 		return JSON.parse(req.responseText);
 	}
 
-	function getEntityNameFromFetchXML(fetchXML) {
-		// Define the regular expression to match the entity name
+	function getPluralNameFromFetchXML(fetchXML) {
+		//todo: fix this later
 		const regex = /<entity\s+name="([^"]+)"/;
-
-		// Execute the regular expression on the FetchXML string
 		const match = regex.exec(fetchXML);
+		let entityName = match[1];
+		if (entityName.substr(entityName.length - 1) == "y" && !entityName.endsWith('journey')) {
+			entityName = entityName.substr(0, entityName.length - 1) + "ie";
+		}
 
-		// Return the matched entity name if found, otherwise return null
-		return match ? match[1] : null;
+		const pluralName = `${entityName}s`
+		return pluralName;
 	}
 
 	if (window.Xrm && window.Xrm.Page) {
@@ -134,10 +136,10 @@
 					const encodedFetchXml = encodeURIComponent(fetchXml);
 					const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
 					const version = versionArray[0] + '.' + versionArray[1];
-					const entityLogicalName = getEntityNameFromFetchXML(fetchXml);//todo
+					const entityPluralName = getPluralNameFromFetchXML(fetchXml);
 					const apiUrl = window.location.pathname.split('/').length <= 2 ?
-						`/api/data/v${version}/${entityLogicalName}s?fetchXml=${encodedFetchXml}` :
-						`/${window.location.pathname.split('/')[1]}/api/data/v${version}/${entityLogicalName}s?fetchXml=${encodedFetchXml}`
+						`/api/data/v${version}/${entityPluralName}?fetchXml=${encodedFetchXml}` :
+						`/${window.location.pathname.split('/')[1]}/api/data/v${version}/${entityPluralName}?fetchXml=${encodedFetchXml}`
 					const newLocation = Xrm.Utility.getGlobalContext().getClientUrl() + apiUrl + '#p';
 					window.postMessage({ action: 'openInWebApi', url: newLocation });
 					return;
