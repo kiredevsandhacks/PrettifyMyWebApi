@@ -5,7 +5,7 @@
         return await response.json();
     }
 
-    async function getWebApiUrl(entityLogicalName = null, viewId = null) {
+    async function getWebApiUrl(entityLogicalName = null, viewId = null, viewType = null) {
         try {
             const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
             const version = versionArray[0] + '.' + versionArray[1];
@@ -21,14 +21,17 @@
             const result = await odataFetch(requestUrl)
             const pluralName = result.value[0].EntitySetName;
 
-            if (!viewId) {//we are on a form
+            if (!viewId) {
+                //form
                 const recordId = Xrm.Page.data.entity.getId().replace('{', '').replace('}', '');
-
                 const newLocation = window.location.origin + apiUrl + pluralName + '(' + recordId + ')';
                 return newLocation;
-            } else {//we are on a view
-
-                const newLocation = window.location.origin + apiUrl + pluralName + `?savedQuery=${viewId}`;;
+            } else {
+                //view
+                const personalView = 4230;
+                const systemView = 1039;
+                const qry = viewType == systemView ? `savedQuery` : `userQuery`;
+                const newLocation = window.location.origin + apiUrl + pluralName + `?${qry}=${viewId}`;;
                 return newLocation;
             }
 
@@ -76,16 +79,13 @@
                 // Create a URL object from the current URL
                 const urlObj = new URL(currentUrl);
 
-                // Get the value of the 'viewid' and entityLogicalName parameter from the URL search parameters
+                // Get the value of the 'viewid' and 'entityLogicalName' parameter from the URL search parameters
                 const viewId = urlObj.searchParams.get('viewid');
                 const entityLogicalName = urlObj.searchParams.get('etn');
+                const viewType = urlObj.searchParams.get('viewType');
 
-
-
-                //if on view, get the fetchxml
                 if (viewId && entityLogicalName) {
-
-                    const newLocation = await getWebApiUrl(entityLogicalName, viewId) + '#p';
+                    const newLocation = await getWebApiUrl(entityLogicalName, viewId, viewType) + '#p';
                     window.postMessage({ action: 'openInWebApi', url: newLocation });
                     return;
                 }
@@ -98,7 +98,6 @@
 
         //in case we are not on form or on view
         if (!window.Xrm.Page.data || !window.Xrm.Page.data.entity) {
-
             alert(`Please open a form or view to use PrettifyMyWebApi`);
             return;
         }
