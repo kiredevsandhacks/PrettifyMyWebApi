@@ -5,13 +5,15 @@
         return await response.json();
     }
 
-    async function getWebApiUrl() {
+    async function getWebApiUrl(entityLogicalName = null, viewId = null) {
         try {
             const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
             const version = versionArray[0] + '.' + versionArray[1];
 
-            const entityLogicalName = Xrm.Page.data.entity.getEntityName();
-
+            if (!viewId) {
+                entityLogicalName = Xrm.Page.data.entity.getEntityName();
+			}
+         
             const apiUrl = window.location.pathname.split('/').length <= 2 ? `/api/data/v${version}/` : `/${window.location.pathname.split('/')[1]}/api/data/v${version}/`
 
             const requestUrl = apiUrl + 'EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq %27' + entityLogicalName + '%27)';
@@ -19,10 +21,17 @@
             const result = await odataFetch(requestUrl)
             const pluralName = result.value[0].EntitySetName;
 
-            const recordId = Xrm.Page.data.entity.getId().replace('{', '').replace('}', '');
+            if (!viewId) {//we are on a form
+                const recordId = Xrm.Page.data.entity.getId().replace('{', '').replace('}', '');
 
-            const newLocation = window.location.origin + apiUrl + pluralName + '(' + recordId + ')';
-            return newLocation;
+                const newLocation = window.location.origin + apiUrl + pluralName + '(' + recordId + ')';
+                return newLocation;
+            } else {//we are on a view
+
+                const newLocation = window.location.origin + apiUrl + pluralName + `?savedQuery=${viewId}`;;
+                return newLocation;
+			}
+            
         } catch (e) {
             alert('Error occurred: ' + e.message);
         }
@@ -52,10 +61,49 @@
     }
 
     if (window.Xrm && window.Xrm.Page) {
-        if (!window.Xrm.Page.data || !window.Xrm.Page.data.entity || !window.Xrm.Utility) {
-            alert(`Please open a form to use PrettifyMyWebApi`);
+
+        //no data and no utility => return
+        if (!window.Xrm.Page.data && !window.Xrm.Utility) {
+            alert(`Please open a form or view to use PrettifyMyWebApi`);
             return;
         }
+
+        //no data but utility ? check if on view
+        if (!window.Xrm.Page.data && window.Xrm.Utility) {
+            try {
+                // Get the current window URL
+                const currentUrl = window.location.href;
+
+                // Create a URL object from the current URL
+                const urlObj = new URL(currentUrl);
+
+                // Get the value of the 'viewid' and entityLogicalName parameter from the URL search parameters
+                const viewId = urlObj.searchParams.get('viewid');
+                const entityLogicalName = urlObj.searchParams.get('etn');
+
+              
+
+                //if on view, get the fetchxml
+                if (viewId && entityLogicalName) {
+               
+                    const newLocation = await getWebApiUrl(entityLogicalName, viewId) + '#p';
+                    window.postMessage({ action: 'openInWebApi', url: newLocation });
+                    return;
+                }
+
+            } catch (e) {
+                alert(`Please open a form or view to use PrettifyMyWebApi`);
+                return;
+            }
+        }
+
+        //in case we are not on form or on view
+        if (!window.Xrm.Page.data || !window.Xrm.Page.data.entity) {
+
+            alert(`Please open a form or view to use PrettifyMyWebApi`);
+            return;
+        }
+
         const newLocation = await getWebApiUrl() + '#p';
         window.postMessage({ action: 'openInWebApi', url: newLocation });
     } else if (/\/api\/data\/v[0-9][0-9]?.[0-9]\//.test(window.location.pathname)) {
