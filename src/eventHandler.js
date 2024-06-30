@@ -5,39 +5,46 @@
         return await response.json();
     }
 
-    async function getWebApiUrl(entityLogicalName = null, viewId = null, viewType = null) {
-        try {
-            const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
-            const version = versionArray[0] + '.' + versionArray[1];
+    async function getViewWebApiUrl(entityLogicalName, viewId, viewType) {
+        let queryParamName = '';
 
-            if (!viewId) {
-                entityLogicalName = Xrm.Page.data.entity.getEntityName();
-            }
-
-            const apiUrl = window.location.pathname.split('/').length <= 2 ? `/api/data/v${version}/` : `/${window.location.pathname.split('/')[1]}/api/data/v${version}/`
-
-            const requestUrl = apiUrl + 'EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq %27' + entityLogicalName + '%27)';
-
-            const result = await odataFetch(requestUrl)
-            const pluralName = result.value[0].EntitySetName;
-
-            if (!viewId) {
-                //form
-                const recordId = Xrm.Page.data.entity.getId().replace('{', '').replace('}', '');
-                const newLocation = window.location.origin + apiUrl + pluralName + '(' + recordId + ')';
-                return newLocation;
-            } else {
-                //view
-                const personalView = 4230;
-                const systemView = 1039;
-                const qry = viewType == systemView ? `savedQuery` : `userQuery`;
-                const newLocation = window.location.origin + apiUrl + pluralName + `?${qry}=${viewId}`;;
-                return newLocation;
-            }
-
-        } catch (e) {
-            alert('Error occurred: ' + e.message);
+        if (viewType == 4230) {
+            queryParamName = 'userQuery'
+        } else if (viewType == 1039) {
+            queryParamName = 'savedQuery';
+        } else {
+            throw 'unknown view type: ' + viewType;
         }
+
+        const baseUrl = await getWebApiBaseUrl(entityLogicalName);
+
+        return `${baseUrl}?${queryParamName}=${viewId}`;;
+    }
+
+    async function getSingleRowApiUrl() {
+        const entityLogicalName = Xrm.Page.data.entity.getEntityName();
+
+        const baseUrl = await getWebApiBaseUrl(entityLogicalName);
+
+        const recordId = Xrm.Page.data.entity.getId().replace('{', '').replace('}', '');
+
+        return `${baseUrl}(${recordId})`;
+    }
+
+    async function getWebApiBaseUrl(entityLogicalName) {
+        const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
+        const version = versionArray[0] + '.' + versionArray[1];
+
+        const apiUrl = window.location.pathname.split('/').length <= 2 ? `/api/data/v${version}/` : `/${window.location.pathname.split('/')[1]}/api/data/v${version}/`
+
+        const requestUrl = apiUrl + 'EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq %27' + entityLogicalName + '%27)';
+
+        const result = await odataFetch(requestUrl)
+        const pluralName = result.value[0].EntitySetName;
+
+        const baseUrl = window.location.origin + apiUrl + pluralName;
+
+        return baseUrl;
     }
 
     function getDataverseUrl() {
@@ -70,40 +77,25 @@
             return;
         }
 
-        //no data but utility ? check if on view
-        if (!window.Xrm.Page.data && window.Xrm.Utility) {
-            try {
-                // Get the current window URL
-                const currentUrl = window.location.href;
+        let urlToOpen = '';
 
-                // Create a URL object from the current URL
-                const urlObj = new URL(currentUrl);
+        const urlObj = new URL(window.location.href);
+        const viewId = urlObj.searchParams.get('viewid');
+        const entityLogicalName = urlObj.searchParams.get('etn');
+        const viewType = urlObj.searchParams.get('viewType');
 
-                // Get the value of the 'viewid' and 'entityLogicalName' parameter from the URL search parameters
-                const viewId = urlObj.searchParams.get('viewid');
-                const entityLogicalName = urlObj.searchParams.get('etn');
-                const viewType = urlObj.searchParams.get('viewType');
-
-                if (viewId && entityLogicalName) {
-                    const newLocation = await getWebApiUrl(entityLogicalName, viewId, viewType) + '#p';
-                    window.postMessage({ action: 'openInWebApi', url: newLocation });
-                    return;
-                }
-
-            } catch (e) {
-                alert(`Please open a form or view to use PrettifyMyWebApi`);
-                return;
-            }
-        }
-
-        //in case we are not on form or on view
-        if (!window.Xrm.Page.data || !window.Xrm.Page.data.entity) {
+        // check if on view
+        if (viewId && entityLogicalName && viewType) {
+            urlToOpen = await getViewWebApiUrl(entityLogicalName, viewId, viewType);
+        } else if (window.Xrm.Page.data?.entity) {
+            urlToOpen = await getSingleRowApiUrl();
+        } else {
             alert(`Please open a form or view to use PrettifyMyWebApi`);
             return;
         }
 
-        const newLocation = await getWebApiUrl() + '#p';
-        window.postMessage({ action: 'openInWebApi', url: newLocation });
+        urlToOpen += '#p'; // add the secret sauce
+        window.postMessage({ action: 'openInWebApi', url: urlToOpen });
     } else if (/\/api\/data\/v[0-9][0-9]?.[0-9]\//.test(window.location.pathname)) {
         // the host check is for supporting on-prem, where we always want to resort to the postmessage based flow
         // we only need total reload on the workflows table when viewing a single record, because of the monaco editor
