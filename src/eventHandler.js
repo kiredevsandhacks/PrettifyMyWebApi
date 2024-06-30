@@ -84,13 +84,18 @@
         const entityLogicalName = urlObj.searchParams.get('etn');
         const viewType = urlObj.searchParams.get('viewType');
 
-        // check if on view
-        if (viewId && entityLogicalName && viewType) {
-            urlToOpen = await getViewWebApiUrl(entityLogicalName, viewId, viewType);
-        } else if (window.Xrm.Page.data?.entity) {
-            urlToOpen = await getSingleRowApiUrl();
-        } else {
-            alert(`Please open a form or view to use PrettifyMyWebApi`);
+        try {
+            // check if on view
+            if (viewId && entityLogicalName && viewType) {
+                urlToOpen = await getViewWebApiUrl(entityLogicalName, viewId, viewType);
+            } else if (window.Xrm.Page.data?.entity) {
+                urlToOpen = await getSingleRowApiUrl();
+            } else {
+                alert(`Please open a form or view to use PrettifyMyWebApi`);
+                return;
+            }
+        } catch (err) {
+            alert(err);
             return;
         }
 
