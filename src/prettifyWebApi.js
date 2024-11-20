@@ -6,6 +6,11 @@
     const formattedValueType = '@OData.Community.Display.V1.FormattedValue';
     const navigationPropertyType = '@Microsoft.Dynamics.CRM.associatednavigationproperty';
     const lookupType = '@Microsoft.Dynamics.CRM.lookuplogicalname';
+    const metaDataKey = "@Microsoft.Dynamics.CRM.globalmetadataversion";
+    const contextKey = "@odata.context";
+    const etagKey = "@odata.etag";
+    const totalRecordCountKey = "@Microsoft.Dynamics.CRM.totalrecordcount";
+    const totalRecordCountLimitExceededKey = "@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded";
 
     const replacedQuote = '__~~__REPLACEDQUOTE__~~__';
     const replacedComma = '__~~__REPLACEDCOMMA__~~__';
@@ -30,23 +35,28 @@
         return;
     }
 
-    const retrievedPrimaryNamesAndKeys = {};
     const lazyLookupInitFunctions = {};
-    const retrievedSearchableAttributes = {};
-    const retrievedClientMetadataPerEntity = {};
-    const retrievedLogicalNamePluralNamePairs = {};
 
-    let retrievedCreatableAttributes = null;
-    let retrievedUpdateableAttributes = null;
-
-    let allPluralNames = null;
+    const memoizedCalls = {};
 
     const foundNavigationProperties = [];
 
-    async function odataFetch(url) {
+    let dataTypeFilters = [];
+
+    async function odataFetch(url, memoize) {
+        if (memoize && memoizedCalls.hasOwnProperty(url)) {
+            return memoizedCalls[url];
+        }
+
         const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
 
-        return await response.json();
+        const responseJson = await response.json();
+
+        if (memoize) {
+            memoizedCalls[url] = responseJson;
+        }
+
+        return responseJson;
     }
 
 
@@ -101,17 +111,11 @@
     }
 
     async function retrieveAllPluralNames() {
-        if (allPluralNames != null) {
-            return allPluralNames;
-        }
-
         const requestUrl = apiUrl + "EntityDefinitions?$select=EntitySetName,LogicalName";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
-        allPluralNames = json.value;
-
-        return allPluralNames;
+        return json.value;
     }
 
     async function retrieveRelationshipDefinition(relationShipName) {
@@ -134,32 +138,22 @@
 
     // TODO: if lookup query is implemented, maybe refactor this into the retrieveAllPluralNames function? Let it just retrieve all needed metadata from the system in one api call
     async function retrievePrimaryNameAndKeyAndPluralName(logicalName) {
-        if (retrievedPrimaryNamesAndKeys.hasOwnProperty(logicalName)) {
-            return retrievedPrimaryNamesAndKeys[logicalName];
-        }
-
         const requestUrl = apiUrl + "EntityDefinitions?$select=PrimaryNameAttribute,PrimaryIdAttribute,EntitySetName&$filter=(LogicalName eq '" + logicalName + "')";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         let primaryNameAndKey = {};
         primaryNameAndKey.name = json.value[0].PrimaryNameAttribute;
         primaryNameAndKey.key = json.value[0].PrimaryIdAttribute;
         primaryNameAndKey.plural = json.value[0].EntitySetName;
 
-        retrievedPrimaryNamesAndKeys[logicalName] = primaryNameAndKey;
-
         return primaryNameAndKey;
     }
 
     async function retrieveLogicalAndPrimaryKeyAndPrimaryName(pluralName) {
-        if (retrievedLogicalNamePluralNamePairs.hasOwnProperty(pluralName)) {
-            return retrievedLogicalNamePluralNamePairs[pluralName];
-        }
-
         const requestUrl = apiUrl + "EntityDefinitions?$select=LogicalName,PrimaryIdAttribute,PrimaryNameAttribute&$filter=(EntitySetName eq '" + pluralName + "')";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         if (json.value.length === 0) {
             return {};
@@ -175,49 +169,38 @@
             primaryNameAttribute: primaryNameAttribute
         };
 
-        retrievedLogicalNamePluralNamePairs[pluralName] = result;
-
         return result;
     }
 
-    async function retrieveSearchableAttributes(logicalName) {
-        if (retrievedSearchableAttributes.hasOwnProperty(logicalName)) {
-            return retrievedSearchableAttributes[logicalName];
-        }
+    async function retrieveAttributesWithTypes(logicalName) {
+        const requestUrl = apiUrl + `EntityDefinitions(LogicalName='${logicalName}')/Attributes?$select=LogicalName,AttributeType`;
 
+        const json = await odataFetch(requestUrl, true);
+
+        return json.value;
+    }
+
+
+    async function retrieveSearchableAttributes(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForAdvancedFind/Value eq true";
 
-        const json = await odataFetch(requestUrl);
-
-        retrievedSearchableAttributes[logicalName] = json.value;
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
 
     async function retrieveUpdateableAttributes(logicalName) {
-        if (retrievedUpdateableAttributes != null) {
-            return retrievedUpdateableAttributes;
-        }
-
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForUpdate eq true";
 
         const json = await odataFetch(requestUrl);
-
-        retrievedUpdateableAttributes = json.value;
 
         return json.value;
     }
 
     async function retrieveCreatableAttributes(logicalName) {
-        if (retrievedCreatableAttributes != null) {
-            return retrievedCreatableAttributes;
-        }
-
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForCreate eq true";
 
-        const json = await odataFetch(requestUrl);
-
-        retrievedCreatableAttributes = json.value;
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
@@ -225,7 +208,7 @@
     async function retrieveOptionSetMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
@@ -233,7 +216,7 @@
     async function retrieveMultiSelectOptionSetMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
@@ -242,7 +225,7 @@
     async function retrieveStateMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.StateAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
@@ -250,7 +233,7 @@
     async function retrieveStatusMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.StatusAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
@@ -258,7 +241,7 @@
     async function retrieveBooleanFieldMetadata(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet,GlobalOptionSet";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
@@ -269,15 +252,10 @@
     }
 
     async function retrieveEntityClientMetadata(logicalName) {
-        if (retrievedClientMetadataPerEntity.hasOwnProperty(logicalName)) {
-            return retrievedClientMetadataPerEntity[logicalName];
-        }
-
         const requestUrl = apiUrl + "GetClientMetadata(ClientMetadataQuery=@ClientMetadataQuery)?@ClientMetadataQuery={'MetadataType':'entity','MetadataSubtype':'{\"" + logicalName + "\":[\"merged\"]}'}";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
         const clientMetadata = JSON.parse(json.Metadata);
-        retrievedClientMetadataPerEntity[logicalName] = clientMetadata;
 
         return clientMetadata;
     }
@@ -330,7 +308,7 @@
         query = query.replaceAll(`'`, `''`);
         const requestUrl = apiUrl + `${pluralName}?$top=10&$select=${fieldToDisplay},${primaryKeyfieldname}&$filter=contains(${fieldToFilterOn}, '${query}')`;
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, false);
 
         return json.value;
     }
@@ -505,6 +483,22 @@
 
             const cls = determineType(value);
 
+            if (key === contextKey || key === metaDataKey || key === etagKey) {
+                // get outta here
+                delete ordered[key];
+                continue;
+            }
+
+            let attributeType = '';
+            if (logicalName != null) {
+                const keyForDataTypeFilter = key.split('@')[0];
+                const attributesWithTypes = await retrieveAttributesWithTypes(logicalName);
+                const attribute = attributesWithTypes.filter(a => a.LogicalName === keyForDataTypeFilter || '_' + a.LogicalName + '_value' === keyForDataTypeFilter)[0];
+                if (attribute != null) {
+                    attributeType = attribute.AttributeType;
+                }
+            }
+
             if (Array.isArray(value)) {
                 ordered[key] = [];
 
@@ -608,6 +602,13 @@
                     ordered[key] = createFieldSpan(cls, value, key);
                 }
             }
+
+            // put the key inside an html element for easier handling later on
+            const keyCopy = ordered[key];
+            delete ordered[key];
+            const escapedKey = escapeHtml(key);
+            const keySpan = `<span class='keySpan' data-cls='${cls}' data-attributetype='${escapeHtml(attributeType)}' data-key='${escapedKey}'>${escapedKey}</span>`
+            ordered[keySpan] = keyCopy;
         }
 
         const newObj = {};
@@ -861,7 +862,7 @@
                 impersonateUserPreview.innerText = '';
                 return;
             }
-            const retrievedSystemUser = await odataFetch(apiUrl + `systemusers?$filter=${impersonateAnotherUserSelect.value} eq '${impersonateAnotherUserInput.value}'&$select=fullname`);
+            const retrievedSystemUser = await odataFetch(apiUrl + `systemusers?$filter=${impersonateAnotherUserSelect.value} eq '${impersonateAnotherUserInput.value}'&$select=fullname`, false);
             if (retrievedSystemUser.error) {
                 impersonateUserPreview.innerText = retrievedSystemUser.error.message;
             } else if (retrievedSystemUser.value.length == 0) {
@@ -894,7 +895,7 @@
 
             const { plural, key, name } = await retrievePrimaryNameAndKeyAndPluralName(selectTable.value);
 
-            const retrievedRecord = await odataFetch(apiUrl + `${plural}(${input.value})?$select=${name}`);
+            const retrievedRecord = await odataFetch(apiUrl + `${plural}(${input.value})?$select=${name}`, false);
 
             if (retrievedRecord.error) {
                 lookupQueryResultPreview.innerText = retrievedRecord.error.message;
@@ -1006,7 +1007,10 @@
     }
 
     function createInput(container, multiLine, datatype) {
-        const value = window.originalResponseCopy[container.dataset.fieldname];
+        let value = null;
+        if (window.pfwaMode === 'update') {
+            value = window.originalResponseCopy[container.dataset.fieldname];
+        }
 
         let input;
 
@@ -1092,8 +1096,10 @@
     }
 
     function createOptionSetValueInput(container, optionSet, nullable, editable, isStatus) {
-        const value = window.originalResponseCopy[container.dataset.fieldname];
-
+        let value = null;
+        if (window.pfwaMode === 'update') {
+            value = window.originalResponseCopy[container.dataset.fieldname];
+        }
         const select = document.createElement('select');
 
         let selectHtml = "";
@@ -1463,7 +1469,7 @@
     }
 
     async function editRecord(logicalName, pluralName, id, isCreateMode) {
-        window.pfwaMode = isCreateMode ? 'create' : 'edit';
+        window.pfwaMode = isCreateMode ? 'create' : 'update';
 
         const editLink = document.getElementsByClassName('editLink')[0];
         editLink.style.display = 'none';
@@ -1833,7 +1839,6 @@
                 }
             }
 
-
             if (value !== originalValue && !(value === '' && originalValue == null)) {
                 if (dataType === 'memo') {
                     if (originalValue?.replaceAll('\r\n', '\n') !== value) {
@@ -2043,8 +2048,42 @@
         }, 200);
     }
 
+    function customJsonStringify(jsonObj, currentDepth) {
+        var padding = "&nbsp;".repeat(currentDepth * 3);
+        var nestedPadding = "&nbsp;".repeat(3);
+
+        let json = '';
+        if (currentDepth === 0) {
+            json = `{`;
+        }
+        for (const key in jsonObj) {
+            let value = jsonObj[key];
+
+            let insertKeyname = '';
+            if (key !== '0' && !parseInt(key)) {
+                insertKeyname = `${key}: `;
+            }
+            if (Array.isArray(value)) {
+                json += `\n${padding}${nestedPadding}${insertKeyname}[${customJsonStringify(value, currentDepth + 1)}\n${padding}${nestedPadding}]`;
+            } else if (typeof value === 'object') {
+                json += `\n${padding}${nestedPadding}${insertKeyname}{${customJsonStringify(value, currentDepth + 1)}\n${padding}${nestedPadding}}`;
+            } else {
+                value = value?.replaceAll('\r\n', '\\n').replaceAll('\n', '\\n');
+                json += `\n${padding}${nestedPadding}${insertKeyname}${value}`;
+            }
+        }
+
+        if (currentDepth === 0) {
+            json += `\n}`;
+        }
+        return json;
+    }
+
     async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview, isCreateMode) {
         window.pfwaMode = isCreateMode ? 'create' : 'read';
+        if (window.originalResponseCopy == null) {
+            window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
+        }
 
         const isMultiple = (jsonObj.value && Array.isArray(jsonObj.value));
         const isSingleColumnValueOnly = Object.keys(jsonObj).length === 2 && jsonObj['@odata.context'] && jsonObj.value;
@@ -2121,6 +2160,12 @@
         if (!result.logicalName) {
             jsonObj = await enrichObjectWithHtml(jsonObj, null, null, null, !isPreview, false, 1, null, isCreateMode, null, false);
         } else if (isMultiple) {
+            delete jsonObj[etagKey];
+            delete jsonObj[metaDataKey];
+            delete jsonObj[contextKey];
+            delete jsonObj[totalRecordCountKey];
+            delete jsonObj[totalRecordCountLimitExceededKey];
+
             if (!titleSet) {
                 if (relationShipDefinition != null) {
                     document.title = 'related ' + pluralName;
@@ -2142,16 +2187,13 @@
                 document.title = result.logicalName;
                 titleSet = true;
             }
-            if (!isPreview) {
-                window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
-            }
 
             singleRecordId = jsonObj[result.primaryIdAttribute];
 
             jsonObj = await enrichObjectWithHtml(jsonObj, result.logicalName, pluralName, result.primaryIdAttribute, !isPreview, false, 1, result.primaryNameAttribute, isCreateMode, relationShipDefinition, isSingleColumnValueOnly);
         }
 
-        let json = JSON.stringify(jsonObj, undefined, 3);
+        let json = customJsonStringify(jsonObj, 0);
         json = json.replaceAll('"', '').replaceAll(replacedQuote, escapeHtml('"'));
         json = json.replaceAll(',', '').replaceAll(replacedComma, ',');
 
@@ -2205,6 +2247,7 @@
 
         if (relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
             setCreateNewRecordButton(pre, result.logicalName);
+            setFilterDataTypesButton(pre);
         }
 
         if (!isSingleColumnValueOnly && relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows' && !isMultiple) {
@@ -2240,12 +2283,164 @@
         pre.prepend(btn);
     }
 
+    function setFilterDataTypesButton(pre) {
+        const btn = document.createElement('button');
+        btn.style = `
+            height: 30px;
+            width: 122px;
+            margin-right: 298px;
+            margin-top: 10px;
+            position: absolute;
+            right: 10px;
+            cursor: pointer;
+            padding:0;
+            font-size:24;
+            padding: 0px 4px;
+            `
+
+        btn.innerHTML = '<div>Filter on data type</div>';
+        btn.onclick = async () => {
+            handleFilterOnDataType(pre);
+        };
+
+        pre.prepend(btn);
+    }
+
+    function handleFilterOnDataType(pre) {
+        const flyOut = document.createElement('div');
+        flyOut.id = 'dataTypeFilterFlyOut';
+        flyOut.style = `
+            height: 194px;
+            width: 99px;
+            margin-right: 298px;
+            margin-top: 50px;
+            position: absolute;
+            right: 10px;
+            border-style: solid;
+            border-width: 2px;
+            padding: 10px;
+            z-index:100;
+        `
+        pre.prepend(flyOut);
+
+        createDataFilterControl('Boolean', 'Boolean', flyOut);
+        createDataFilterControl('Choice', 'Picklist|State|Status|Virtual', flyOut);
+        createDataFilterControl('Date', 'DateTime', flyOut);
+        createDataFilterControl('Guid', 'Uniqueidentifier', flyOut);
+        createDataFilterControl('Lookup', 'Lookup|Owner', flyOut);
+        createDataFilterControl('Number', 'Integer|Decimal|Double|Money|BigInt', flyOut);
+        createDataFilterControl('String', 'String|Memo', flyOut);
+        createDataFilterControl('Hide null', 'hideNull', flyOut);
+
+        flyOut.onmouseleave = () => flyOut.remove();
+    }
+
+    function createDataFilterControl(label, dataType, parent) {
+        const div = document.createElement('div');
+        div.style = `
+            margin: 0 0 10px 0;
+            align-content: center;
+            display: flex;
+            cursor: pointer;
+        `
+        const checkbox = document.createElement('input');
+        checkbox.classList.add('dataFilterCheckBox')
+        checkbox.style = `
+            width: auto;
+            margin: 0 5px 0 0;
+            cursor: pointer;
+        `
+        checkbox.type = 'checkbox';
+
+        if (dataTypeFilters.filter(str => str === dataType).length > 0) {
+            checkbox.checked = true;
+        }
+
+        checkbox.onclick = async (e) => {
+            e.stopPropagation()
+
+            if (checkbox.checked) {
+                dataTypeFilters.push(dataType);
+            } else {
+                dataTypeFilters = dataTypeFilters.filter(str => str !== dataType);
+            }
+
+            if (dataTypeFilters.length > 0) {
+
+                const allKeySpans = document.querySelectorAll('.keySpan');
+
+                for (let keySpan of allKeySpans) {
+                    const key = keySpan.dataset.key;
+                    const keyForDataTypeFilter = key.split('@')[0];
+                    const attributeType = keySpan.dataset.attributetype;
+                    const cls = keySpan.dataset.cls;
+
+                    const hideNulls = dataTypeFilters.filter(str => str === 'hideNull').length > 0;
+                    if (hideNulls) {
+                        if (cls === 'null') {
+
+                            keySpan.style.display = 'none';
+                            keySpan.nextSibling.nextSibling.style.display = 'none';
+                            continue;
+                        }
+                    }
+
+                }
+                //     const keyForDataTypeFilter = key.split('@')[0];
+                //     const attributesWithTypes = await retrieveAttributesWithTypes(logicalName);
+
+                //     const attribute = attributesWithTypes.filter(a => a.LogicalName === keyForDataTypeFilter || '_' + a.LogicalName + '_value' === keyForDataTypeFilter)[0];
+
+                //     if (attribute == null) {
+                //         alert(`Could not map attribute ${keyForDataTypeFilter} for filtering on data type.`);
+                //         delete ordered[keyForDataTypeFilter];
+                //         delete ordered[keyForDataTypeFilter + formattedValueType];
+                //         delete ordered[keyForDataTypeFilter + navigationPropertyType];
+                //         delete ordered[keyForDataTypeFilter + lookupType];
+                //         continue;
+                //     }
+
+                //     const hideNulls = dataTypeFilters.filter(str => str === 'hideNull').length > 0;
+                //     if (hideNulls) {
+                //         if (cls === 'null') {
+                //             delete ordered[keyForDataTypeFilter];
+                //             delete ordered[keyForDataTypeFilter + formattedValueType];
+                //             delete ordered[keyForDataTypeFilter + navigationPropertyType];
+                //             delete ordered[keyForDataTypeFilter + lookupType];
+                //             continue;
+                //         }
+                //     }
+
+                //     const showOnlySelectedAny = dataTypeFilters.filter(str => str !== 'hideNull').length > 0;
+
+                //     if (showOnlySelectedAny) {
+                //         const shouldHideThisType = dataTypeFilters.filter(str => str.includes(attribute.AttributeType)).length === 0;
+                //         if (shouldHideThisType) {
+                //             delete ordered[keyForDataTypeFilter];
+                //             delete ordered[keyForDataTypeFilter + formattedValueType];
+                //             delete ordered[keyForDataTypeFilter + navigationPropertyType];
+                //             delete ordered[keyForDataTypeFilter + lookupType];
+                //             continue;
+                //         }
+                //     }
+            }
+        };
+
+        div.onclick = async (e) => {
+            checkbox.click();
+        };
+
+        div.appendChild(checkbox);
+        div.append(label);
+        parent.appendChild(div);
+    }
+
     function setBrowseRelationShipsButton(pre, logicalName) {
         const btn = document.createElement('button');
         btn.style = `
             height: 30px;
             width: 122px;
-            margin-right: 296px;
+            margin-right: 438px;
             margin-top: 10px;
             position: absolute;
             right: 10px;
@@ -2584,7 +2779,7 @@
 
         newDiv.style = 'position:relative;'
 
-        const response = await odataFetch(url);
+        const response = await odataFetch(url, false);
 
         await prettifyWebApi(response, newDiv, pluralName, true, false);
 
@@ -2668,16 +2863,20 @@
         return false;
     }
 
-    async function makeItPretty() {
+    async function makeItPretty(optionalJsobObject) {
         if (window.location.hash === '#pf') {
             document.body.innerText = 'Loading your flow...';
         }
-
-        const response = await odataFetch(window.location.href);
+        let jsonObject = {};
+        if (optionalJsobObject) {
+            jsonObject = optionalJsobObject;
+        } else {
+            jsonObject = await odataFetch(window.location.href, false);
+        }
 
         window.currentEntityPluralName = window.location.pathname.split('(').shift().split('/').pop();
 
-        await prettifyWebApi(response, document.body, window.currentEntityPluralName, false);
+        await prettifyWebApi(jsonObject, document.body, window.currentEntityPluralName, false);
 
         if (window.location.hash === '#pf') {
             return;
@@ -2758,6 +2957,18 @@
                 z-index: 40;
                 position: relative !important;
                 margin: 4px;
+            }
+
+            #dataTypeFilterFlyOut {
+                border-color: black;
+                background-color: white;
+            }
+            
+            @media (prefers-color-scheme: dark) {
+                #dataTypeFilterFlyOut {
+                    border-color: #d3d3d3f2;
+                    background-color: #28282B;
+                }
             }
 
             #transParentOverlay {
@@ -2867,7 +3078,7 @@
                 }  
             }
 
-            .panel span:not(.lookupField):not(.lookupEdit):not(.pf-link):not(.copiedNotification):not(.copyButton) {
+            .panel span:not(.keySpan):not(.lookupField):not(.lookupEdit):not(.pf-link):not(.copiedNotification):not(.copyButton) {
                 margin-right: 24px;
                 padding-right: 16px;
             }
