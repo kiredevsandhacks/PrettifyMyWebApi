@@ -2083,6 +2083,10 @@
         window.pfwaMode = isCreateMode ? 'create' : 'read';
         if (window.originalResponseCopy == null) {
             window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
+            //stageid being deprecated but fieldname in metadata doesn't match the json field name, so is a special case. Ensure json property name matches logical name
+            if (Object.hasOwn(window.originalResponseCopy, '_stageid_value') && !Object.hasOwn(window.originalResponseCopy, 'stageid')) {
+                window.originalResponseCopy['stageid'] = window.originalResponseCopy['_stageid_value'];
+            }
         }
 
         const isMultiple = (jsonObj.value && Array.isArray(jsonObj.value));
