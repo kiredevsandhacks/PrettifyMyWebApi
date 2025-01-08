@@ -129,7 +129,7 @@
         const flowUniqueId = hrefToCheck.split('flows/').pop().split('?')[0].split('/')[0];
 
         if (flowUniqueId && flowUniqueId.length === 36) {
-            const url = instanceUrl + 'api/data/v9.2/workflows?$filter=resourceid eq ' + flowUniqueId + ' or workflowidunique eq ' + flowUniqueId + '#pf'
+            const url = instanceUrl + 'api/data/v9.2/workflows?$filter=resourceid eq ' + flowUniqueId + ' or workflowidunique eq ' + flowUniqueId + ' or workflowid eq ' + flowUniqueId + '#pf'
             window.postMessage({ action: 'openFlowInWebApi', url: url });
         } else {
             // for example, on make.powerapps it only works when viewing a flow from a solution
