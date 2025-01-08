@@ -618,7 +618,7 @@
 
                 if (isSingleRecord) {
                     newObj['Edit this row'] = createLinkSpan('pf-link', await generateEditMenu(logicalName, recordId, false));
-                    newObj['Delete this row'] = createLinkSpan('pf-link', await generateDeleteAnchor(logicalName, recordId, isSingleRecord));
+                    newObj['Delete this row'] = createLinkSpan('pf-link delete-menu', await generateDeleteAnchor(logicalName, recordId, isSingleRecord));
                 } else {
                     newObj['Web Api Link'] = createLinkSpan('pf-link', generateWebApiAnchor(recordId, pluralName));
                 }
@@ -1046,7 +1046,7 @@
 
         let multiSelectDivHtml = '';
 
-        optionSet.forEach(function (option) {
+        optionSet.sort(o => o.Value).forEach(function (option) {
             const formattedOption = option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label;
 
             const isSelected = values?.find(v => v === option.Value?.toString()) != null;
@@ -1627,6 +1627,11 @@
         document.querySelectorAll('.lookupDisplay').forEach((el) => {
             el.style.display = 'none';
         });
+
+        const deleteMenu = document.getElementsByClassName('delete-menu')[0];
+        if (deleteMenu != null) {
+            deleteMenu.style.display = 'none';
+        }
 
         applySettings();
     }
@@ -2275,6 +2280,11 @@
 
         if (!isSingleColumnValueOnly && !isMultiple && !isPreview && result.logicalName != null) {
             setImpersonateUserHandlers();
+        }
+
+        const deleteMenu = document.getElementsByClassName('delete-menu')[0];
+        if (deleteMenu != null) {
+            deleteMenu.style.display = 'unset';
         }
     }
 
