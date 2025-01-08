@@ -1511,6 +1511,12 @@
                 continue;
             }
 
+            if (attribute.LogicalName === 'stageid' || attribute.LogicalName === '_stageid_value') {
+                // this field causes many issues for some reason
+                // just leave it out
+                continue;
+            }
+
             const attributeType = attribute.AttributeType;
             if (attributeType === 'String' || attributeType === 'EntityName') {
                 createInput(container, false, 'string');
@@ -2247,7 +2253,7 @@
 
         if (relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows') {
             setCreateNewRecordButton(pre, result.logicalName);
-            setFilterDataTypesButton(pre);
+            // setFilterDataTypesButton(pre);
         }
 
         if (!isSingleColumnValueOnly && relationShipDefinition == null && result.logicalName && !isCreateMode && !isPreview && pluralName !== 'workflows' && !isMultiple) {
@@ -2440,7 +2446,7 @@
         btn.style = `
             height: 30px;
             width: 122px;
-            margin-right: 438px;
+            margin-right: 298px;
             margin-top: 10px;
             position: absolute;
             right: 10px;
