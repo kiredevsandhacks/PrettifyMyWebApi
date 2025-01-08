@@ -1046,7 +1046,11 @@
 
         let multiSelectDivHtml = '';
 
-        optionSet.sort(o => o.Value).forEach(function (option) {
+        optionSet.sort(function (a, b) {
+            return a.Value - b.Value;
+        });
+
+        optionSet.forEach(function (option) {
             const formattedOption = option.Value + ' : ' + option.Label?.UserLocalizedLabel?.Label;
 
             const isSelected = values?.find(v => v === option.Value?.toString()) != null;
