@@ -192,7 +192,7 @@
     async function retrieveUpdateableAttributes(logicalName) {
         const requestUrl = apiUrl + "EntityDefinitions(LogicalName='" + logicalName + "')/Attributes?$filter=IsValidForUpdate eq true";
 
-        const json = await odataFetch(requestUrl);
+        const json = await odataFetch(requestUrl, true);
 
         return json.value;
     }
@@ -510,7 +510,7 @@
                     }
                 }
                 else {
-                    // if every value is not an object, it an an array of primitives. We want to render as an array with formatted values, without numbers prepended
+                    // if value is not an object, it an an array of primitives. We want to render as an array with formatted values, without numbers prepended
                     for (let nestedKey in value) {
                         let nestedValue = value[nestedKey];
 
@@ -1031,7 +1031,10 @@
     }
 
     function createMultiSelectOptionSetValueInput(container, optionSet) {
-        const values = window.originalResponseCopy[container.dataset.fieldname]?.split(',');
+        let values = [];
+        if (window.pfwaMode === 'update') {
+            values = window.originalResponseCopy[container.dataset.fieldname]?.split(',');
+        }
 
         const multiSelectDivContainer = document.createElement('div');
         const fakeSelect = document.createElement('select');
@@ -1163,8 +1166,10 @@
     }
 
     function createBooleanInput(container, falseOption, trueOption) {
-        const value = window.originalResponseCopy[container.dataset.fieldname];
-
+        let value = null;
+        if (window.pfwaMode === 'update') {
+            value = window.originalResponseCopy[container.dataset.fieldname];
+        }
         const select = document.createElement('select');
 
         let selectHtml = "<option value='null'>null</option>"; // empty option for clearing it
@@ -1690,7 +1695,15 @@
         const changedFields = {};
         const enabledFields = document.getElementsByClassName('mainPanel')[0].getElementsByClassName('enabledInputField');
         for (let input of enabledFields) {
-            let originalValue = window.originalResponseCopy[input.dataset.fieldname];
+            let originalValue = null;
+            if (!isCreateMode) {
+                originalValue = window.originalResponseCopy[input.dataset.fieldname];
+                // if not found for some reason, normalize to null to prevent issues
+                if (originalValue === undefined) {
+                    originalValue = null;
+                }
+            }
+
             const dataType = input.dataset.datatype;
             const inputValue = input.value;
             const fieldName = input.dataset.fieldname;
@@ -2087,7 +2100,7 @@
 
     async function prettifyWebApi(jsonObj, htmlElement, pluralName, isPreview, isCreateMode) {
         window.pfwaMode = isCreateMode ? 'create' : 'read';
-        if (window.originalResponseCopy == null) {
+        if (!isCreateMode && !isPreview) {
             window.originalResponseCopy = JSON.parse(JSON.stringify(jsonObj));
         }
 
