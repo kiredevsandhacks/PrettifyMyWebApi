@@ -18,3 +18,12 @@ Browse related rows by using the 'View relationships' button. When viewing relat
 Quickly copy the contents of a column to your clipboard by hovering and clicking the copy button.
 
 You can prettify single rows, but also the results of your OData and FetchXml queries.
+
+
+Firefox:
+- Run ./firefox/build.sh to build the Firefox version. It writes dist/firefox and a zip in dist.
+- Temporary install: open about:debugging, choose This Firefox, Load Temporary Add-on, and select dist/firefox/manifest.json. Firefox removes it again when you close the browser.
+- Permanent install: sign the zip as an unlisted add-on on addons.mozilla.org, then open the signed .xpi in Firefox. Firefox Developer Edition and Nightly can also load the unsigned zip when xpinstall.signatures.required is set to false in about:config.
+- Firefox needs access to your Dataverse site. When it asks, allow it, or enable it in about:addons under Permissions.
+- Firefox shows application/json in its own JSON viewer and adds a strict Content-Security-Policy to that page. The Firefox build serves Dataverse Web Api pages (dynamics.com) as plain text, which gives the same page Chrome shows, and the extension works from there.
+- Containers: the extension opens new tabs in the same Firefox container as the tab where you click the button, so you stay logged in.

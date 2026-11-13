@@ -28,6 +28,14 @@
     let apiUrl = '';
     let titleSet = false;
 
+    if (isFirefoxJsonViewer()) {
+        // Firefox puts its own JSON viewer, with a strict Content-Security-Policy, on top of the response.
+        // The extension serves the Web Api as plain text to avoid that, which needs access to the site.
+        console.warn('PrettifyMyWebApi: the Firefox JSON viewer is active on this page.');
+        alert('PrettifyMyWebApi cannot run on top of the Firefox JSON viewer. Open about:addons, select PrettifyMyWebApi, and under Permissions allow access to your Dataverse site (dynamics.com). Then reload this page.');
+        return;
+    }
+
     try {
         apiUrl = /([\/a-zA-Z0-9]+)?\/api\/data\/v[0-9][0-9]?.[0-9]\//.exec(window.location.pathname)[0];
     } catch {
@@ -50,7 +58,16 @@
 
         const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
 
-        const responseJson = await response.json();
+        let responseJson;
+        try {
+            responseJson = await response.json();
+        } catch (err) {
+            throw new Error(`Expected JSON but got ${response.status} ${response.statusText} (${response.headers.get('content-type')}) from ${response.url}${response.redirected ? ' after a redirect' : ''}`);
+        }
+
+        if (!response.ok) {
+            console.error(`PrettifyMyWebApi: ${response.status} ${response.statusText} from ${response.url}`, responseJson);
+        }
 
         if (memoize) {
             memoizedCalls[url] = responseJson;
@@ -154,6 +171,11 @@
         const requestUrl = apiUrl + "EntityDefinitions?$select=LogicalName,PrimaryIdAttribute,PrimaryNameAttribute&$filter=(EntitySetName eq '" + pluralName + "')";
 
         const json = await odataFetch(requestUrl, true);
+
+        if (!Array.isArray(json.value)) {
+            // Dataverse answered with an error instead of a list, for example when the session belongs to another user or environment
+            throw new Error('Dataverse returned an error for the table metadata request: ' + (json.error?.message ?? JSON.stringify(json).slice(0, 300)));
+        }
 
         if (json.value.length === 0) {
             return {};
@@ -2118,11 +2140,19 @@
 
         let result = await retrieveLogicalAndPrimaryKeyAndPrimaryName(pluralName);
 
-        if (window.location.hash === '#pf' && jsonObj.value.length === 1) {
-            const recordId = jsonObj.value[0][result.primaryIdAttribute];
-            const newUrl = apiUrl + pluralName + "(" + recordId + ")#p";
-            window.location.href = newUrl;
-            return;
+        if (window.location.hash === '#pf') {
+            if (jsonObj.error) {
+                throw new Error(jsonObj.error.message || JSON.stringify(jsonObj.error));
+            }
+
+            console.info(`PrettifyMyWebApi: the flow query returned ${jsonObj.value?.length} row(s)`);
+
+            if (jsonObj.value.length === 1) {
+                const recordId = jsonObj.value[0][result.primaryIdAttribute];
+                const newUrl = apiUrl + pluralName + "(" + recordId + ")#p";
+                window.location.href = newUrl;
+                return;
+            }
         }
 
         let singleRecordId = '';
@@ -2885,6 +2915,15 @@
         return table;
     }
 
+    function isFirefoxJsonViewer() {
+        try {
+            return document.contentType === 'application/vnd.mozilla.json.view' ||
+                document.querySelector('link[href^="chrome://devtools-jsonview-styles"]') != null;
+        } catch {
+            return false;
+        }
+    }
+
     function checkIfJsonViewerEnabled() {
         try {
             if (navigator.userAgent.match(/edg/i)) {
@@ -3220,5 +3259,14 @@
         addcss(css);
     }
 
-    await makeItPretty();
+    try {
+        await makeItPretty();
+    } catch (err) {
+        console.error('PrettifyMyWebApi:', err);
+
+        if (window.location.hash === '#pf') {
+            // the page only says 'Loading your flow...' at this point, so show what went wrong
+            document.body.innerText = 'PrettifyMyWebApi could not open this flow: ' + (err?.message ?? err);
+        }
+    }
 })()
