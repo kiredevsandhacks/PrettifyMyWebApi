@@ -924,7 +924,7 @@
             el('option', { value: 'azureactivedirectoryobjectid' }, 'azureactivedirectoryobjectid'));
         const impersonationLabel = el('span', { className: 'impersonationIdFieldLabel' }, 'systemuserid:');
         const impersonationInput = el('input', { placeholder: emptyGuid, on: { input: () => updateImpersonationPreview() } });
-        const impersonationPreview = el('span');
+        const impersonationPreview = el('span', { className: 'impersonateUserPreview' });
 
         const impersonateDiv = el('div', { className: 'impersonateDiv pfwa-hidden' },
             el('div', {}, 'Base impersonation on this field: ', impersonationField, '  ', el('i', {}, el('a', { href: impersonationDocsUrl, target: '_blank' }, "What's this?"))),
@@ -2084,6 +2084,10 @@
             @media (prefers-color-scheme: dark) {
                 #relationshipBrowser {
                     background-color: #28282B;
+                }
+
+                .disabledLink {
+                    color: #E9E9E9;
                 }
             }
 
