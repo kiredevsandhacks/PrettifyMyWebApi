@@ -230,32 +230,50 @@
     // Metadata
     // ---------------------------------------------------------------------
 
-    async function retrieveEntityDefinitions() {
-        const json = await odataFetch(apiUrl + 'EntityDefinitions?$select=EntitySetName,LogicalName,PrimaryIdAttribute,PrimaryNameAttribute', true);
+    // Table definitions are loaded lazily: a filtered query per table when its primary attributes are needed,
+    // and the list of all table names only when a name mapping is needed that is not known yet.
 
-        return json.value;
+    const retrievedEntityDefinitions = []; // definitions retrieved by the filtered queries
+
+    // filterProperty: LogicalName or EntitySetName
+    async function retrieveEntityDefinition(filterProperty, value) {
+        const json = await odataFetch(`${apiUrl}EntityDefinitions?$select=LogicalName,EntitySetName,PrimaryIdAttribute,PrimaryNameAttribute&$filter=(${filterProperty} eq '${value}')`, true);
+        const entity = json.value?.[0];
+
+        if (entity && !retrievedEntityDefinitions.includes(entity)) {
+            retrievedEntityDefinitions.push(entity);
+        }
+
+        return entity;
     }
 
-    async function findEntityByLogicalName(logicalName) {
-        const entities = await retrieveEntityDefinitions();
-
-        return entities.find(e => e.LogicalName === logicalName);
+    function findEntityByLogicalName(logicalName) {
+        return retrieveEntityDefinition('LogicalName', logicalName);
     }
 
-    async function findEntityByPluralName(pluralName) {
-        const entities = await retrieveEntityDefinitions();
-        const lowerCasePluralName = pluralName?.toLowerCase();
+    function findEntityByPluralName(pluralName) {
+        return retrieveEntityDefinition('EntitySetName', pluralName);
+    }
 
-        return entities.find(e => e.EntitySetName === pluralName)
-            ?? entities.find(e => e.EntitySetName?.toLowerCase() === lowerCasePluralName);
+    // LogicalName and EntitySetName of all tables
+    async function retrieveAllTableNames() {
+        const json = await odataFetch(apiUrl + 'EntityDefinitions?$select=EntitySetName,LogicalName', true);
+
+        return json.value ?? [];
+    }
+
+    // finds the table by one of its names, without a request when its definition was retrieved before
+    async function findTableName(nameProperty, value) {
+        return retrievedEntityDefinitions.find(e => e[nameProperty] === value)
+            ?? (await retrieveAllTableNames()).find(e => e[nameProperty] === value);
     }
 
     async function retrievePluralName(logicalName) {
-        return (await findEntityByLogicalName(logicalName))?.EntitySetName;
+        return (await findTableName('LogicalName', logicalName))?.EntitySetName;
     }
 
     async function retrieveLogicalName(pluralName) {
-        return (await findEntityByPluralName(pluralName))?.LogicalName;
+        return (await findTableName('EntitySetName', pluralName))?.LogicalName;
     }
 
     // returns an empty object when the plural name does not belong to a table, e.g. for sdk messages
