@@ -23,6 +23,11 @@
     const hiddenCollectionKeys = [...hiddenKeys, totalRecordCountKey, totalRecordCountLimitExceededKey];
 
     const emptyGuid = '00000000-0000-0000-0000-000000000000';
+    const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // row search in the lookup and impersonation inputs
+    const maxSearchResults = 8; // keep it small to prevent overloading the database
+    const searchDelayMs = 300;
     const settingsStorageKey = 'pfwaSettings';
     const impersonationDocsUrl = 'https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user';
 
@@ -282,6 +287,31 @@
         const json = await odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes/Microsoft.Dynamics.CRM.${metadataType}?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`, true);
 
         return json.value;
+    }
+
+    // the columns a row search can filter on with contains() (primary name column first),
+    // and whether the results can be ordered by modifiedon
+    async function retrieveSearchMetadata(logicalName) {
+        const [entity, json] = await Promise.all([
+            findEntityByLogicalName(logicalName),
+            odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes?$select=LogicalName,AttributeType,AttributeOf,IsValidForAdvancedFind`, true)
+        ]);
+
+        const attributes = json.value ?? [];
+        const primaryName = entity?.PrimaryNameAttribute;
+
+        // AttributeOf is set for helper columns like 'owneridname', those cannot be filtered on
+        const otherColumns = attributes
+            .filter(a => (a.AttributeType === 'String' || a.AttributeType === 'Memo') && a.AttributeOf == null && a.IsValidForAdvancedFind?.Value && a.LogicalName !== primaryName)
+            .map(a => a.LogicalName)
+            .sort();
+
+        return {
+            entity,
+            primaryName,
+            searchColumns: primaryName ? [primaryName, ...otherColumns] : otherColumns,
+            hasModifiedOn: attributes.some(a => a.LogicalName === 'modifiedon')
+        };
     }
 
     async function retrieveEditableAttributes(logicalName, isCreateMode) {
@@ -973,12 +1003,16 @@
             el('option', { value: 'systemuserid' }, 'systemuserid'),
             el('option', { value: 'azureactivedirectoryobjectid' }, 'azureactivedirectoryobjectid'));
         const impersonationLabel = el('span', { className: 'impersonationIdFieldLabel' }, 'systemuserid:');
-        const impersonationInput = el('input', { placeholder: emptyGuid, on: { input: () => updateImpersonationPreview() } });
-        const impersonationPreview = el('span', { className: 'impersonateUserPreview' });
+        const userSearch = createRecordSearch({
+            getLogicalName: () => 'systemuser',
+            getIdColumn: () => impersonationField.value,
+            placeholder: 'Search a user, or paste a guid'
+        });
 
         const impersonateDiv = el('div', { className: 'impersonateDiv pfwa-hidden' },
             el('div', {}, 'Base impersonation on this field: ', impersonationField, '  ', el('i', {}, el('a', { href: impersonationDocsUrl, target: '_blank' }, "What's this?"))),
-            el('div', {}, impersonationLabel, impersonationInput, '  ', impersonationPreview));
+            el('div', {}, 'Search users by: ', userSearch.searchBySelect),
+            el('div', {}, impersonationLabel, userSearch.element, userSearch.preview));
 
         const editLink = actionLink('Edit this row', () => editRecord(logicalName, pluralName, id, isCreateMode), 'editLink');
         const cancelLink = actionLink('Cancel', () => reloadPage(pluralName));
@@ -1005,37 +1039,22 @@
         function setImpersonationEnabled(enabled) {
             impersonate.input.checked = enabled;
             setVisible(impersonateDiv, enabled);
+
+            if (enabled) {
+                userSearch.prepare();
+            }
         }
 
         function setImpersonationField(field) {
             impersonationField.value = field;
             impersonationLabel.textContent = field + ':';
-            updateImpersonationPreview();
+            userSearch.search();
         }
 
         function setImpersonatedUser(field, userId) {
             setImpersonationEnabled(true);
-            impersonationInput.value = userId;
+            userSearch.input.value = userId;
             setImpersonationField(field);
-        }
-
-        async function updateImpersonationPreview() {
-            if (!impersonationInput.value) {
-                impersonationPreview.textContent = '';
-                return;
-            }
-
-            const result = await odataFetch(apiUrl + `systemusers?$filter=${impersonationField.value} eq '${impersonationInput.value}'&$select=fullname`, false);
-
-            if (result.error) {
-                impersonationPreview.textContent = result.error.message;
-            } else if (result.value.length == 0) {
-                impersonationPreview.textContent = 'user not found';
-            } else if (result.value.length == 1) {
-                impersonationPreview.textContent = result.value[0].fullname;
-            } else {
-                impersonationPreview.textContent = 'Something went wrong with retrieving the systemuser.';
-            }
         }
 
         impersonate.input.addEventListener('change', () => setImpersonationEnabled(impersonate.input.checked));
@@ -1053,7 +1072,7 @@
                 previewChanges: previewChanges.input,
                 impersonate: impersonate.input,
                 impersonationField,
-                impersonationInput,
+                impersonationSearch: userSearch,
                 rememberSettings: rememberSettings.input,
                 setImpersonatedUser,
             };
@@ -1357,6 +1376,251 @@
         };
     }
 
+    // A combined input which holds the id of a row. Typing text searches the rows of a table on the
+    // 'search by' column, a pasted guid is looked up as id directly. When no row has that id, the guid
+    // is searched for as text, as it can also be the content of a column. Picking a result puts its id in the input.
+    // getLogicalName: the table to search. getIdColumn(entity): the column whose value goes into the input.
+    function createRecordSearch({ getLogicalName, getIdColumn, placeholder }) {
+        const input = el('input', {
+            placeholder,
+            autocomplete: 'off',
+            spellcheck: false,
+            on: {
+                input: () => scheduleSearch(),
+                keydown: (e) => onKeyDown(e),
+                focus: () => setResultsOpen(items.length > 0 || emptyMessage != null),
+                blur: () => setResultsOpen(false)
+            }
+        });
+
+        const searchBySelect = el('select', { className: 'searchBySelect', on: { change: () => searchAgain() } });
+        const results = el('div', { className: 'recordSearchResults pfwa-hidden', on: { mousedown: (e) => e.preventDefault() } }); // keep the focus on the input
+        const preview = el('span', { className: 'lookupPreview' });
+        const element = el('span', { className: 'recordSearch' }, input, results);
+
+        let metadataPromise = null;
+        let items = []; // { id, name, matchedValue }
+        let emptyMessage = null;
+        let activeIndex = -1;
+        let searchTimer = null;
+        let requestNumber = 0; // responses of outdated requests are ignored
+
+        function loadMetadata() {
+            metadataPromise ??= retrieveSearchMetadata(getLogicalName()).then(metadata => {
+                const previous = searchBySelect.value;
+                searchBySelect.replaceChildren(...metadata.searchColumns.map(column =>
+                    el('option', { value: column }, column === metadata.primaryName ? column + ' (primary column)' : column)));
+                searchBySelect.disabled = metadata.searchColumns.length === 0;
+
+                if (metadata.searchColumns.includes(previous)) {
+                    searchBySelect.value = previous;
+                }
+                return metadata;
+            });
+            return metadataPromise;
+        }
+
+        // accepts guids wrapped in braces, as copied from some places
+        function currentText() {
+            return input.value.trim().replace(/^\{(.*)\}$/, '$1');
+        }
+
+        function scheduleSearch() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => search(), searchDelayMs);
+        }
+
+        function searchAgain() {
+            if (input.value.trim()) {
+                search();
+            }
+        }
+
+        async function fetchRows(metadata, idColumn, filter, top) {
+            const { entity, primaryName } = metadata;
+            const searchColumn = searchBySelect.value;
+            const columns = [...new Set([idColumn, primaryName, searchColumn].filter(Boolean))];
+
+            let url = `${apiUrl}${entity.EntitySetName}?$select=${columns.join(',')}&$filter=${filter}&$top=${top}`;
+
+            // most recently changed rows first
+            if (top > 1 && metadata.hasModifiedOn) {
+                url += '&$orderby=modifiedon desc';
+            }
+
+            const json = await odataFetch(url, false);
+
+            if (json.error) {
+                throw new Error(json.error.message);
+            }
+
+            return json.value.map(row => ({
+                id: row[idColumn],
+                name: primaryName ? row[primaryName] : null,
+                matchedValue: searchColumn !== primaryName ? row[searchColumn] : null
+            }));
+        }
+
+        async function search() {
+            clearTimeout(searchTimer);
+
+            const request = ++requestNumber;
+            const text = currentText();
+
+            if (!text) {
+                preview.textContent = '';
+                showResults([], null);
+                return;
+            }
+
+            // the previous results stay visible until the new ones arrive
+            preview.textContent = 'searching...';
+
+            let outcome;
+            try {
+                outcome = await findRows(text);
+            } catch (error) {
+                outcome = { status: error.message, rows: [] };
+            }
+
+            if (request !== requestNumber) {
+                return;
+            }
+
+            if (outcome.resolvedId) {
+                input.value = outcome.resolvedId; // without braces
+            }
+
+            preview.textContent = outcome.status;
+            showResults(outcome.rows, outcome.message ?? null);
+        }
+
+        // returns the preview status text, the rows to pick from and an optional message for when there are no rows
+        async function findRows(text) {
+            const metadata = await loadMetadata();
+
+            if (metadata.entity == null) {
+                return { status: 'table ' + getLogicalName() + ' not found', rows: [] };
+            }
+
+            const idColumn = getIdColumn(metadata.entity);
+            const isGuid = guidPattern.test(text);
+
+            if (isGuid) {
+                const [row] = await fetchRows(metadata, idColumn, `${idColumn} eq ${text}`, 1);
+
+                if (row) {
+                    return { status: row.name ?? '(no name)', rows: [], resolvedId: text };
+                }
+            }
+
+            // a guid which is not an id is searched for as text, as it can also be the content of a column
+            const status = isGuid ? 'no row found with this id' : '';
+            const searchColumn = searchBySelect.value;
+
+            if (!searchColumn) {
+                return { status: isGuid ? status : 'this table has no searchable columns', rows: [] };
+            }
+
+            let filter = `contains(${searchColumn},'${encodeURIComponent(text.replaceAll(`'`, `''`))}')`;
+
+            // e.g. users without an azureactivedirectoryobjectid cannot be picked
+            if (idColumn !== metadata.entity.PrimaryIdAttribute) {
+                filter += ` and ${idColumn} ne null`;
+            }
+
+            const rows = await fetchRows(metadata, idColumn, filter, maxSearchResults);
+
+            return { status, rows, message: rows.length === 0 ? `No rows found where ${searchColumn} contains '${text}'` : null };
+        }
+
+        function showResults(rows, message) {
+            items = rows;
+            emptyMessage = message;
+            activeIndex = -1;
+
+            results.replaceChildren();
+            appendChildren(results, [
+                rows.map((row, index) => el('div', { className: 'recordSearchItem', on: { click: () => pick(index), mousemove: () => setActive(index) } },
+                    el('div', { className: 'recordSearchName' }, row.name ?? '(no name)'),
+                    row.matchedValue != null ? el('div', { className: 'recordSearchDetail' }, searchBySelect.value + ': ' + row.matchedValue) : null,
+                    el('div', { className: 'recordSearchDetail' }, row.id))),
+                message != null ? el('div', { className: 'recordSearchEmpty' }, message) : null]);
+
+            // results which arrive after the user left the input are shown when it gets the focus again
+            setResultsOpen(document.activeElement === input && (rows.length > 0 || message != null));
+        }
+
+        function setResultsOpen(open) {
+            setVisible(results, open);
+        }
+
+        function setActive(index) {
+            activeIndex = index;
+            [...results.children].forEach((child, i) => child.classList.toggle('active', i === index));
+        }
+
+        function pick(index) {
+            const row = items[index];
+
+            requestNumber++; // ignore searches which are still running
+            clearTimeout(searchTimer);
+
+            input.value = row.id;
+            preview.textContent = row.name ?? '(no name)';
+            showResults([], null);
+        }
+
+        function onKeyDown(e) {
+            const isOpen = !results.classList.contains('pfwa-hidden');
+
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                if (items.length === 0) {
+                    return;
+                }
+                e.preventDefault();
+                setResultsOpen(true);
+
+                const step = e.key === 'ArrowDown' ? 1 : -1;
+                setActive(isOpen ? (activeIndex + step + items.length) % items.length : (step === 1 ? 0 : items.length - 1));
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+
+                if (isOpen && activeIndex >= 0) {
+                    pick(activeIndex);
+                } else {
+                    search();
+                }
+            } else if (e.key === 'Escape' && isOpen) {
+                e.preventDefault();
+                setResultsOpen(false);
+            }
+        }
+
+        return {
+            input,
+            searchBySelect,
+            preview,
+            element,
+            search,
+            // call when the table changed, to load its searchable columns and search again
+            tableChanged: () => {
+                metadataPromise = null;
+                searchAgain();
+            },
+            clear: () => {
+                requestNumber++;
+                clearTimeout(searchTimer);
+                input.value = '';
+                preview.textContent = '';
+                showResults([], null);
+            },
+            // loads the 'search by' options in advance
+            prepare: () => loadMetadata().catch(error => preview.textContent = error.message),
+            value: currentText
+        };
+    }
+
     function createLookupEditor(slot, targets) {
         const { fieldName } = slot;
         const initialTable = slot.lookupType ?? targets[0];
@@ -1365,12 +1629,16 @@
             targets.map(target => el('option', { value: target }, target)));
         tableSelect.value = initialTable;
 
-        const input = el('input', { placeholder: emptyGuid, on: { input: () => updatePreview() } });
-        const preview = el('span', { className: 'lookupPreview' });
+        const search = createRecordSearch({
+            getLogicalName: () => tableSelect.value,
+            getIdColumn: (entity) => entity.PrimaryIdAttribute,
+            placeholder: 'Search, or paste a guid'
+        });
 
         const editPanel = el('div', { className: 'lookupEditMenuDiv pfwa-hidden' },
             el('div', { className: 'lookupEditRow' }, 'Table: ', tableSelect),
-            el('div', { className: 'lookupEditRow' }, 'Row id:', input, preview));
+            el('div', { className: 'lookupEditRow' }, 'Search by: ', search.searchBySelect),
+            el('div', { className: 'lookupEditRow' }, 'Row:', search.element, search.preview));
 
         const makeNullNotice = el('div', { className: 'makeLookupNullDiv pfwa-hidden' }, el('b', {}, 'Lookup will be cleared (will be set to null)'));
 
@@ -1399,25 +1667,9 @@
         }
 
         async function onTableChanged() {
+            search.tableChanged();
+            search.prepare();
             await syncSelectedTable();
-            await updatePreview();
-        }
-
-        async function updatePreview() {
-            if (!input.value) {
-                preview.textContent = '';
-                return;
-            }
-
-            if (!tableSelect.value) {
-                alert('selectTable does not contain a value. This should not happen.');
-                return;
-            }
-
-            const entity = await findEntityByLogicalName(tableSelect.value);
-            const record = await odataFetch(apiUrl + `${entity.EntitySetName}(${input.value})?$select=${entity.PrimaryNameAttribute}`, false);
-
-            preview.textContent = record.error ? record.error.message : record[entity.PrimaryNameAttribute];
         }
 
         async function beginEdit(editMode) {
@@ -1432,7 +1684,9 @@
             editor.editMode = editMode;
 
             if (editMode === 'makenull') {
-                input.value = '';
+                search.clear();
+            } else {
+                search.prepare();
             }
 
             setVisible(makeNullNotice, editMode === 'makenull');
@@ -1442,7 +1696,7 @@
 
         function undo() {
             editor.editMode = null;
-            input.value = '';
+            search.clear();
 
             setVisible(undoItem, false);
             setVisible(makeNullNotice, false);
@@ -1465,18 +1719,17 @@
                 return { originalValue, value: null };
             }
 
-            const inputValue = input.value;
-            const value = `/${await retrievePluralName(tableSelect.value)}(${inputValue})`;
+            const inputValue = search.value();
 
             if (inputValue === '') {
                 throw new UserError('Error for lookup field: ' + fieldName + '. The field was marked for update but it is empty. If you do not want to edit this field, hit "undo changes".');
             }
 
-            if (inputValue.length !== 36) {
-                throw new UserError('Error for lookup field: ' + fieldName + '. The value ' + value + ' is not a valid guid.');
+            if (!guidPattern.test(inputValue)) {
+                throw new UserError('Error for lookup field: ' + fieldName + '. The value ' + inputValue + ' is not a valid guid. Pick a row from the search results, or paste a guid.');
             }
 
-            return { originalValue, value };
+            return { originalValue, value: `/${await retrievePluralName(tableSelect.value)}(${inputValue})` };
         }
 
         // make sure the navigation property matches the selected table
@@ -1618,14 +1871,14 @@
         }
 
         const field = menu.impersonationField.value;
-        const userId = menu.impersonationInput.value;
+        const userId = menu.impersonationSearch.value();
 
         if (userId == null || userId === '') {
             throw new UserError('User impersonation was checked, but ' + field + ' is empty');
         }
 
-        if (userId.length !== 36) {
-            throw new UserError('User impersonation input error: ' + userId + ' is not a valid guid.');
+        if (!guidPattern.test(userId)) {
+            throw new UserError('User impersonation input error: ' + userId + ' is not a valid guid. Pick a user from the search results, or paste a guid.');
         }
 
         if (field === 'systemuserid') {
@@ -2320,6 +2573,62 @@
 
             .lookupPreview {
                 margin-left: 10px;
+            }
+
+            /* row search dropdown of the lookup and impersonation inputs */
+
+            .recordSearch {
+                position: relative;
+                display: inline-block;
+            }
+
+            .recordSearchResults {
+                position: absolute;
+                top: 100%;
+                left: 8px;
+                z-index: 40;
+                min-width: 300px;
+                max-width: 600px;
+                background: white;
+                border: 1px solid #a0a0a0;
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+            }
+
+            .recordSearchItem {
+                padding: 3px 6px;
+                cursor: pointer;
+            }
+
+            .recordSearchItem.active {
+                background: #dde7f5;
+            }
+
+            .recordSearchName, .recordSearchDetail {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .recordSearchDetail {
+                font-size: 11px;
+                opacity: 0.7;
+            }
+
+            .recordSearchEmpty {
+                padding: 3px 6px;
+                font-style: italic;
+                opacity: 0.7;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .recordSearchResults {
+                    background: #131313;
+                    border-color: #444;
+                }
+
+                .recordSearchItem.active {
+                    background: #2f3a4d;
+                }
             }
 
             /* changes preview table */
