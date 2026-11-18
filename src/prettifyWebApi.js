@@ -561,23 +561,26 @@
      *   label: display only text in front of the value, e.g. 'Name: '
      *   formattedValue: display only text after the value, shown dimmed
      *   extraClasses: additional css classes
-     * A very long value, e.g. the description of an email, is cut off at the edge of the page with '…', followed by 'show all'
-     * (not in the header, which cuts off by itself). Clicking the field still copies the full value.
+     * A very long text (the value with its formatted value), e.g. the description of an email, is cut off at the edge
+     * of the page with '…', followed by 'show all' (not in the header, which cuts off by itself).
+     * Clicking the field still copies the full value.
      */
     function createField(cls, value, { label, formattedValue, extraClasses = [] } = {}) {
         const text = String(value);
         const displayText = formatDisplayText(value);
-        const isLong = displayText.length > longValueLength && !extraClasses.includes('inlineField');
-        const formattedPart = formattedValue == null ? null : el('span', { className: 'formattedValue' }, ' : ' + formatDisplayText(formattedValue));
+        const formattedText = formattedValue == null ? null : ' : ' + formatDisplayText(formattedValue);
+        const length = displayText.length + (formattedText?.length ?? 0);
+        const isLong = length > longValueLength && !extraClasses.includes('inlineField');
 
-        const field = el('span', { className: [cls, 'field', ...extraClasses, isLong ? 'longValue' : null].filter(Boolean).join(' ') },
+        // the text parts together, so that a long text is cut off once, at its end
+        const fieldText = el('span', { className: 'fieldText' },
             label,
             el('span', { className: 'copyValue' }, displayText),
-            formattedPart);
+            formattedText == null ? null : el('span', { className: 'formattedValue' }, formattedText));
 
-        if (isLong) {
-            field.append(createShowAllLink(field, displayText.length));
-        }
+        const field = el('span', { className: [cls, 'field', ...extraClasses, isLong ? 'longValue' : null].filter(Boolean).join(' ') },
+            fieldText,
+            isLong ? createShowAllLink(length) : null);
 
         field.copyText = text;
         field.addEventListener('click', () => copyFieldToClipboard(field, text));
@@ -585,27 +588,33 @@
         return field;
     }
 
-    // values with more characters than this are cut off, see .longValue
+    // texts with more characters than this are cut off, see .longValue
     const longValueLength = 200;
 
-    // shows all of a value which was cut off, wrapped to the width of the page, or cuts it off again
-    function createShowAllLink(field, length) {
+    // Shows all of a text which was cut off, wrapped to the width of the page, or cuts it off again.
+    // link.setShowAll(false) cuts it off from elsewhere, e.g. when editing starts.
+    function createShowAllLink(length) {
         const link = el('a', {
             className: 'showAllLink',
             href: '#',
-            title: `Show all ${length} characters`,
             on: {
                 click: (e) => {
                     e.preventDefault();
                     e.stopPropagation(); // not a click on the field, which copies it
 
-                    const showAll = field.classList.toggle('showingAll');
-
-                    link.textContent = showAll ? 'show less' : 'show all';
-                    link.title = showAll ? 'Cut it off again' : `Show all ${length} characters`;
+                    setShowAll(!link.parentElement.classList.contains('showingAll'));
                 }
             }
-        }, 'show all');
+        });
+
+        function setShowAll(showAll) {
+            link.parentElement?.classList.toggle('showingAll', showAll);
+            link.textContent = showAll ? 'show less' : 'show all';
+            link.title = showAll ? 'Cut it off again' : `Show all ${length} characters`;
+        }
+
+        setShowAll(false);
+        link.setShowAll = setShowAll;
 
         return link;
     }
@@ -633,13 +642,16 @@
         return keySpan;
     }
 
-    // a field which gets an input appended when the row is edited
+    // A field, followed by the container which receives its editor when the row is edited (only in the main view).
+    // The editor is next to the field instead of inside it, so it is laid out the same for short and long values.
+    // Returns [field, editor container].
     function createEditableField(cls, value, fieldName, view, fieldOptions) {
         const field = createField(cls, value, fieldOptions);
+        const editorContainer = view ? el('span', { className: 'fieldEditor' }) : null;
 
-        view?.slots.set(fieldName, { kind: 'field', fieldName, element: field });
+        view?.slots.set(fieldName, { kind: 'field', fieldName, element: editorContainer });
 
-        return field;
+        return [field, editorContainer];
     }
 
     // the container which receives the lookup edit controls when the row is edited
@@ -768,7 +780,8 @@
         }
 
         if (key === options.primaryNameAttribute) {
-            return el('b', {}, createEditableField(cls, value, key, view));
+            const [field, editorContainer] = createEditableField(cls, value, key, view);
+            return [el('b', {}, field), editorContainer];
         }
 
         return createEditableField(cls, value, key, view);
@@ -1326,11 +1339,8 @@
         // in some very rare cases, dataverse will return an empty string instead of null
         const isEmptyString = value === '';
 
-        if (dataType === 'memo') {
-            slot.element.classList.add('memoField');
-        }
-
-        slot.element.append(input);
+        // a textarea goes on a line of its own, below the row
+        slot.element.append(dataType === 'memo' ? el('div', { className: 'memoEditor' }, input) : input);
 
         return {
             fieldName,
@@ -1493,7 +1503,7 @@
 
         updateSummary();
 
-        slot.element.append(el('div', {}, fakeSelect, dropdown));
+        slot.element.append(el('span', { className: 'multiSelectEditor' }, fakeSelect, dropdown));
 
         return {
             fieldName,
@@ -1660,6 +1670,11 @@
     async function editRecord(logicalName, pluralName, id, isCreateMode) {
         const view = state.mainView;
         state.mode = isCreateMode ? 'create' : 'update';
+
+        // long values are cut off again while editing, the editors show all of them
+        for (const link of view.panel.querySelectorAll('.showingAll > .showAllLink')) {
+            link.setShowAll(false);
+        }
 
         try {
             if (!isCreateMode) {
@@ -2308,6 +2323,13 @@
             style.remove();
         }
 
+        // a row with a very long text which is cut off: the field directly, the primary name (in bold), or the name of a lookup while editing
+        const longRow = [
+            '.pfwa-row:has(> .longValue:not(.showingAll))',
+            '.pfwa-row:has(> b > .longValue:not(.showingAll))',
+            '.editing .pfwa-row:has(> .lookupEdit > .longValue:not(.showingAll))',
+        ].join(', ');
+
         document.head.appendChild(el('style', { id: 'pfwaStyles', type: 'text/css' }, `
             body {
                 font-size: 13px !important;
@@ -2707,29 +2729,31 @@
                 background: rgba(128, 128, 128, 0.35);
             }
 
-            /* a very long value is cut off at the edge of the page with '…', followed by 'show all', see createField.
-               Its row becomes a flex row, so the value can shrink to the space left after the column name */
-            .pfwa-row:has(> .longValue:not(.showingAll)), .pfwa-row > b:has(> .longValue:not(.showingAll)) {
+            /* A very long text is cut off at the edge of the page with '…', followed by 'show all', see createField.
+               Its row becomes a flex row, so the field can shrink to the space left after the column name */
+            ${longRow} {
                 display: flex;
             }
 
-            .longValue:not(.showingAll), .pfwa-row > b:has(> .longValue:not(.showingAll)) {
+            :is(${longRow}) > .longValue, :is(${longRow}) > b, :is(${longRow}) > b > .longValue, :is(${longRow}) > .lookupEdit > .longValue {
+                flex: 0 1 auto;
                 min-width: 0;
             }
 
-            .longValue:not(.showingAll) > .copyValue {
-                display: block; /* also cut off while editing, when a memo field is not a flex box */
+            :is(${longRow}) > b {
+                display: flex;
+            }
+
+            .longValue:not(.showingAll) > .fieldText {
+                display: block;
                 min-width: 0;
                 overflow: hidden;
                 white-space: nowrap;
                 text-overflow: ellipsis;
             }
 
-            .longValue > :not(.copyValue) {
-                flex: none;
-            }
-
             .showAllLink {
+                flex: none;
                 margin-left: 1ch;
             }
 
@@ -2738,38 +2762,30 @@
                 display: none;
             }
 
-            /* While editing a long memo value, its textarea goes on a line of its own below the row, at the same distance
-               from the left as the textarea of a short memo value. The parts of the field become parts of the flex row,
-               with an empty line break (the ::after of the row) between the value and the textarea */
-            .editing .pfwa-row:has(> .longValue.memoField:not(.showingAll)) {
+            /* While editing, the editors in such a row become parts of the flex row, so they are laid out as in any other row:
+               an input stays on the line, a block (a textarea, the lookup edit panel) takes a line of its own */
+            .editing :is(${longRow}) {
                 flex-wrap: wrap;
-                padding-bottom: 1lh; /* the same space below the textarea as a short memo value has (an empty line) */
             }
 
-            .editing .pfwa-row:has(> .longValue.memoField:not(.showingAll))::after {
-                content: '';
-                flex-basis: 100%;
-                order: 1;
-            }
-
-            .editing .longValue.memoField:not(.showingAll) {
+            .editing :is(${longRow}) > :is(.fieldEditor, .lookupEdit) {
                 display: contents;
             }
 
-            .editing .longValue.memoField:not(.showingAll) > .copyValue {
+            .editing :is(${longRow}) > :is(.fieldEditor, .lookupEdit) > div {
+                flex-basis: 100%;
+            }
+
+            .editing :is(${longRow}) > .longValue, .editing :is(${longRow}) > b, .editing :is(${longRow}) > .lookupEdit > .longValue {
                 flex: 1 1 0;
             }
 
-            .editing .longValue.memoField:not(.showingAll) > textarea {
-                order: 2;
-            }
-
-            /* all of a long value, wrapped to the width of the page instead of one very long line */
+            /* all of a long text, wrapped to the width of the page instead of one very long line */
             .field.showingAll {
                 display: inline;
             }
 
-            .field.showingAll .copyValue {
+            .field.showingAll > .fieldText {
                 white-space: pre-wrap;
                 overflow-wrap: anywhere;
             }
@@ -2799,15 +2815,32 @@
                 height: 20px;
             }
 
-            /* the textarea goes below the value, and the row grows with it.
-               (A long value makes its row a flex row, in which the field is a block, so it needs the height as well) */
-            .editing .field.memoField {
-                display: inline;
-                height: auto;
+            /* a textarea goes on a line of its own below the row (a block breaks out of the line), with an empty line below it */
+            .memoEditor {
+                padding-bottom: 1lh;
             }
 
-            .editing .field.memoField textarea {
+            .memoEditor textarea {
                 display: block;
+            }
+
+            /* the editor goes right after the value, as high as the field (the spacing of the field goes after the editor) */
+            .editing .field:has(+ .fieldEditor), .editing b:has(+ .fieldEditor) > .field {
+                margin-right: 0;
+                padding-right: 0;
+            }
+
+            .editing .fieldEditor:not(:has(> .memoEditor)) {
+                display: inline-flex;
+                height: 20px;
+                vertical-align: top;
+                margin-right: 24px;
+                padding-right: 16px;
+            }
+
+            /* the line of a memo value is not raised, so the textarea follows right below it */
+            .editing .field:has(+ .fieldEditor > .memoEditor), .editing b:has(+ .fieldEditor > .memoEditor) > .field {
+                height: auto;
             }
 
             .editing .lookupField {
