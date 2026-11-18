@@ -127,21 +127,33 @@
     }
 
     // An anchor that runs a handler instead of navigating
+    // An action which runs onClick when clicked. While onClick runs, the action is busy: it stays in place,
+    // greyed out, and ignores clicks. Actions never hide themselves, so a double click can't land on
+    // another action that moved under the cursor.
     function actionLink(text, onClick, className) {
-        return el('a', {
+        const link = el('a', {
             className,
             href: '#',
             on: {
-                click: (e) => {
+                click: async (e) => {
                     e.preventDefault();
-                    onClick(e);
+
+                    if (link.classList.contains('busy')) {
+                        return;
+                    }
+
+                    link.classList.add('busy');
+
+                    try {
+                        await onClick(e);
+                    } finally {
+                        link.classList.remove('busy');
+                    }
                 }
             }
         }, text);
-    }
 
-    function linkSpan(...children) {
-        return el('span', { className: 'pf-link' }, children);
+        return link;
     }
 
     /*
@@ -151,11 +163,6 @@
      * The data itself is only 'key: value'.
      */
 
-    // separates actions with ' · ', e.g. 'new tab · form · preview'
-    function joinActions(actions) {
-        return actions.filter(Boolean).flatMap((action, i) => i === 0 ? [action] : [' · ', action]);
-    }
-
     // secondary text, e.g. the row count in the header
     function createMuted(text) {
         return el('span', { className: 'muted' }, text);
@@ -164,12 +171,12 @@
     // the actions on a row, as the first line inside its braces, e.g. 'new tab · form · preview'
     function createActionRow(actions, extraClass) {
         const visibleActions = actions.filter(Boolean);
-        return visibleActions.length === 0 ? null : el('div', { className: ['pfwa-row', 'actionRow', extraClass].filter(Boolean).join(' ') }, joinActions(visibleActions));
+        return visibleActions.length === 0 ? null : el('div', { className: ['pfwa-row', 'actionRow', 'actions', extraClass].filter(Boolean).join(' ') }, visibleActions);
     }
 
     // actions after a value on the same line, e.g. a solutionid's 'new tab'
     function createInlineActions(actions) {
-        return el('span', { className: 'inlineActions' }, joinActions(actions));
+        return el('span', { className: 'inlineActions actions' }, actions);
     }
 
     // The sticky line at the top of a panel: what is shown on the left, the actions on the page on the right.
@@ -179,8 +186,8 @@
         const header = {
             readContext: el('span', { className: 'headerContext readOnly' }),
             editContext: el('span', { className: 'headerContext editOnly' }),
-            readActions: el('span', { className: 'headerActions readOnly' }),
-            editActions: el('span', { className: 'headerActions editOnly' }),
+            readActions: el('span', { className: 'headerActions actions readOnly' }),
+            editActions: el('span', { className: 'headerActions actions editOnly' }),
             editBody: el('div', { className: 'headerBody editOnly' }), // below the line: the edit options and the changes to commit
         };
 
@@ -190,7 +197,7 @@
     }
 
     function setActions(container, actions) {
-        container.replaceChildren(...joinActions(actions));
+        container.replaceChildren(...actions.filter(Boolean));
     }
 
     // a row of the json-like output, e.g. 'key: value'. Pass null as key for array items.
@@ -488,7 +495,7 @@
         }
 
         if (recordId == null || recordId === '') {
-            return [el('span', { className: 'muted' }, 'could not generate links')];
+            return [createMuted('could not generate links')];
         }
 
         return [
@@ -512,11 +519,7 @@
             return null;
         }
 
-        const link = actionLink('disassociate', async () => {
-            setVisible(link, false);
-            await disassociate();
-            setVisible(link, true);
-        }, 'dangerLink');
+        const link = actionLink('disassociate', () => disassociate(), 'dangerLink');
         link.title = 'Remove the relationship between this row and the parent row';
 
         return link;
@@ -526,15 +529,19 @@
     // Fields
     // ---------------------------------------------------------------------
 
-    // a tooltip for everything that can be copied, showing exactly what will be copied
-    // it is set when hovering, because there is nothing to copy while editing
-    function addCopyTooltip(element, text) {
-        const maxLength = 100;
-        const tooltip = 'Click to copy: ' + (text.length > maxLength ? text.slice(0, maxLength) + '…' : text);
+    // A tooltip for everything that can be copied (an element with a copyText), showing exactly what will be copied.
+    // One listener for the whole page sets it when hovering, because there is nothing to copy while editing.
+    function showCopyTooltip(event) {
+        const element = event.target.closest('.field, .copyableKey');
 
-        element.addEventListener('mouseenter', () => {
-            element.title = element.closest('.editing') ? '' : tooltip;
-        });
+        if (element?.copyText == null) {
+            return;
+        }
+
+        const maxLength = 100;
+        const text = element.copyText;
+
+        element.title = element.closest('.editing') ? '' : 'Click to copy: ' + (text.length > maxLength ? text.slice(0, maxLength) + '…' : text);
     }
 
     /*
@@ -554,8 +561,8 @@
             el('span', { className: 'copyValue' }, formatDisplayText(value)),
             formattedPart);
 
+        field.copyText = text;
         field.addEventListener('click', () => copyFieldToClipboard(field, text));
-        addCopyTooltip(field, text);
 
         return field;
     }
@@ -563,7 +570,7 @@
     // a column name which copies itself to the clipboard when clicked
     function createCopyableKey(key) {
         const keySpan = el('span', { className: 'keySpan copyableKey' }, key);
-        addCopyTooltip(keySpan, key);
+        keySpan.copyText = key;
 
         keySpan.addEventListener('click', async () => {
             // no copying while editing, same as fields
@@ -981,10 +988,7 @@
         view.panel = panel;
         state.mainView = view;
 
-        const newRowLink = canCreateOrBrowse ? actionLink('new row', async () => {
-            setVisible(newRowLink, false);
-            await handleCreateNewRecord(logicalName);
-        }) : null;
+        const newRowLink = canCreateOrBrowse ? actionLink('new row', () => handleCreateNewRecord(logicalName)) : null;
 
         if (newRowLink) {
             newRowLink.title = 'Create a new row in this table';
@@ -1005,17 +1009,14 @@
     }
 
     function createRelationshipsLink(logicalName) {
-        const link = actionLink('relationships', async () => {
-            setVisible(link, false);
-            await handleBrowseRelationships(logicalName);
-        });
+        const link = actionLink('relationships', () => handleBrowseRelationships(logicalName));
         link.title = 'Browse the relationships of this row';
 
         return link;
     }
 
     function createDeleteLink(pluralName, id) {
-        const link = actionLink('delete', () => deleteRecord(pluralName, id, link), 'dangerLink');
+        const link = actionLink('delete', () => deleteRecord(pluralName, id), 'dangerLink');
         link.title = 'Delete this row';
 
         return link;
@@ -1064,7 +1065,6 @@
         const cancelLink = actionLink('cancel', () => reloadPage(pluralName));
         // below the changes, away from 'save' in the header, so a double click on 'save' does not commit
         const commitLink = actionLink('commit save', async () => {
-            setHeaderState('saving');
             const { changes, impersonateHeader } = menu.pendingSave;
             await commitSave(pluralName, id, changes, impersonateHeader, isCreateMode, true);
         });
@@ -1075,21 +1075,25 @@
         const changeCount = createMuted('');
 
         // editing: save or cancel, confirm: cancel (committing is below the changes), saving: no actions.
-        // The actions are right aligned, so in confirm nothing takes the place of 'save'
+        // The actions are right aligned, so in confirm nothing takes the place of 'save'.
+        // While committing, 'commit save · back' stays in place: commit save is busy (see actionLink) and back is greyed out too.
         function setHeaderState(headerState) {
             const actions = {
                 editing: [saveLink, cancelLink],
                 confirm: [cancelLink],
                 saving: [el('span', {}, 'saving…')],
             };
-            setVisible(commitActions, headerState === 'confirm');
+            const isCommitting = headerState === 'saving' && menu.pendingSave != null;
+
+            setVisible(commitActions, headerState === 'confirm' || isCommitting);
+            backLink.classList.toggle('busy', isCommitting);
             setActions(header.editActions, actions[headerState]);
         }
 
         header.editContext.append((isCreateMode ? 'new ' : 'editing ') + logicalName, ' ', changeCount);
 
         const previewContainer = el('div', { className: 'previewChangesDiv' });
-        const commitActions = el('div', { className: 'commitActions pfwa-hidden' }, commitLink, ' · ', backLink);
+        const commitActions = el('div', { className: 'commitActions actions pfwa-hidden' }, commitLink, backLink);
 
         const options = el('div', { className: 'editOptions' },
             [previewChanges, bypassPlugins, bypassFlows, impersonate, rememberSettings].map(checkbox => checkbox.label));
@@ -1476,10 +1480,9 @@
         undoLink.title = 'Undo the changes to this lookup';
 
         // e.g. 'edit · clear · undo', undo is only shown when the lookup was changed
-        const undoItem = el('span', {}, ' · ', undoLink);
-        setVisible(undoItem, false);
+        setVisible(undoLink, false);
 
-        const links = el('span', { className: 'lookupEditLinks' }, editLink, ' · ', clearLink, undoItem);
+        const links = el('span', { className: 'lookupEditLinks actions' }, editLink, clearLink, undoLink);
 
         slot.element.append(links, makeNullNotice, editPanel);
 
@@ -1536,14 +1539,14 @@
 
             setVisible(makeNullNotice, editMode === 'makenull');
             setVisible(editPanel, editMode === 'update');
-            setVisible(undoItem, true);
+            setVisible(undoLink, true);
         }
 
         function undo() {
             editor.editMode = null;
             input.value = '';
 
-            setVisible(undoItem, false);
+            setVisible(undoLink, false);
             setVisible(makeNullNotice, false);
             setVisible(editPanel, false);
         }
@@ -1607,9 +1610,36 @@
         const view = state.mainView;
         state.mode = isCreateMode ? 'create' : 'update';
 
-        // replaced while the edit mode loads, so it can't be clicked twice. The action row is hidden once editing
-        view.editMenu.editLink.replaceWith(createMuted('loading…'));
+        try {
+            await createEditors(view, logicalName, isCreateMode);
+        } catch (error) {
+            // show the plain error, and cancel the edit once it is dismissed
+            console.error(error);
+            alert(error?.message ?? String(error));
+            await reloadPage(pluralName);
+            return;
+        }
 
+        view.panel.classList.add('editing');
+
+        applySettings(view.editMenu);
+
+        // keep the number of changes in the header up to date
+        let countTimeout = null;
+        const scheduleCount = () => {
+            clearTimeout(countTimeout);
+            countTimeout = setTimeout(() => updateChangeCount(view, isCreateMode), 150);
+        };
+
+        for (const eventName of ['input', 'change', 'click']) {
+            view.panel.addEventListener(eventName, scheduleCount);
+        }
+
+        updateChangeCount(view, isCreateMode);
+    }
+
+    // creates an editor for every editable column of the row
+    async function createEditors(view, logicalName, isCreateMode) {
         const attributes = await retrieveEditableAttributes(logicalName, isCreateMode);
 
         const [picklist, multiSelect, stateOptions, status, boolean] = await Promise.all([
@@ -1637,23 +1667,6 @@
                 view.editors.push(editor);
             }
         }
-
-        view.panel.classList.add('editing');
-
-        applySettings(view.editMenu);
-
-        // keep the number of changes in the header up to date
-        let countTimeout = null;
-        const scheduleCount = () => {
-            clearTimeout(countTimeout);
-            countTimeout = setTimeout(() => updateChangeCount(view, isCreateMode), 150);
-        };
-
-        for (const eventName of ['input', 'change', 'click']) {
-            view.panel.addEventListener(eventName, scheduleCount);
-        }
-
-        updateChangeCount(view, isCreateMode);
     }
 
     // e.g. '2 changes' or '1 change · invalid value'
@@ -1823,10 +1836,6 @@
     function createChangesTable(changes, isCreateMode) {
         const table = el('table', { id: 'previewTable' });
 
-        if (changes.length === 0) {
-            return table;
-        }
-
         const columns = isCreateMode ? ['column', 'new'] : ['column', 'old', 'new'];
         const cellText = (value) => value == null ? '(empty)' : String(value);
 
@@ -1901,29 +1910,23 @@
         await editRecord(logicalName, state.currentPluralName, null, true);
     }
 
-    async function deleteRecord(pluralName, id, deleteLink) {
-        setVisible(deleteLink, false);
+    async function deleteRecord(pluralName, id) {
+        if (!confirm('Are you sure you want to delete this row?')) {
+            return;
+        }
 
-        try {
-            if (!confirm('Are you sure you want to delete this row?')) {
-                return;
+        const response = await fetch(apiUrl + pluralName + '(' + id + ')', { method: 'DELETE' });
+
+        if (response.status === 204) {
+            if (confirm('Row was deleted. Click OK to close this page.')) {
+                window.close();
             }
+        } else {
+            const json = await response.json();
 
-            const response = await fetch(apiUrl + pluralName + '(' + id + ')', { method: 'DELETE' });
-
-            if (response.status === 204) {
-                if (confirm('Row was deleted. Click OK to close this page.')) {
-                    window.close();
-                }
-            } else {
-                const json = await response.json();
-
-                if (json.error) {
-                    alert(json.error.message);
-                }
+            if (json.error) {
+                alert(json.error.message);
             }
-        } finally {
-            setVisible(deleteLink, true);
         }
     }
 
@@ -2263,6 +2266,29 @@
                 display: none !important;
             }
 
+            /* actions are separated with ' · ', drawn here so that a hidden action takes its separator with it */
+            .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden) {
+                position: relative;
+                margin-left: 3ch;
+            }
+
+            /* drawn in the gap in front of the action, outside of it, so it is not underlined and clicking it does not click the action */
+            .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden)::before {
+                content: '·';
+                position: absolute;
+                left: -3ch;
+                width: 3ch;
+                text-align: center;
+                color: gray;
+                pointer-events: none;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden)::before {
+                    color: #8c8c8c;
+                }
+            }
+
             /* actions after a value on the same line */
             .inlineActions, .lookupEditLinks {
                 margin-left: 2ch;
@@ -2277,6 +2303,12 @@
                 color: firebrick;
             }
 
+            /* an action which is running, see actionLink */
+            a.busy, a.dangerLink.busy {
+                color: gray;
+                cursor: progress;
+            }
+
             @media (prefers-color-scheme: dark) {
                 .muted {
                     color: #8c8c8c;
@@ -2284,6 +2316,10 @@
 
                 a.dangerLink {
                     color: #ff7b72;
+                }
+
+                a.busy, a.dangerLink.busy {
+                    color: #8c8c8c;
                 }
             }
 
@@ -2376,7 +2412,6 @@
             .boolean { color: blue; }
             .null { color: magenta; }
             .guid { color: firebrick; }
-            .pf-link { color: blue; }
             .primarykey { color: tomato; }
 
             @media (prefers-color-scheme: dark) {
@@ -2395,7 +2430,6 @@
             .boolean { color: #5bd75b; }
             .null { color: #ae82eb; }
             .guid { color: #5cc3ed; }
-            .pf-link { color: lightblue; }
             .primarykey { color: tomato; }
 
             body {
@@ -2623,6 +2657,8 @@
             }
             `));
     }
+
+    document.addEventListener('mouseover', showCopyTooltip);
 
     await makeItPretty();
 })()
