@@ -425,12 +425,9 @@
     // Links
     // ---------------------------------------------------------------------
 
-    function createApiLink(pluralName, guid, text) {
-        return el('a', { target: '_blank', href: `${apiUrl}${pluralName}(${stripBraces(guid)})#p` }, text);
-    }
-
+    // opens the row in the Web Api in a new tab
     function createWebApiLink(guid, pluralName) {
-        return createApiLink(pluralName, guid, 'Open in Web Api');
+        return el('a', { target: '_blank', href: `${apiUrl}${pluralName}(${stripBraces(guid)})#p` }, 'Open in new tab');
     }
 
     function createFormLink(logicalName, guid) {
@@ -464,29 +461,44 @@
     // Fields
     // ---------------------------------------------------------------------
 
+    // a tooltip for everything that can be copied, showing exactly what will be copied
+    // it is set when hovering, because there is nothing to copy while editing
+    function addCopyTooltip(element, text) {
+        const maxLength = 100;
+        const tooltip = 'Click to copy: ' + (text.length > maxLength ? text.slice(0, maxLength) + '…' : text);
+
+        element.addEventListener('mouseenter', () => {
+            element.title = element.closest('.editing') ? '' : tooltip;
+        });
+    }
+
     /*
      * A value which can be copied to the clipboard by clicking it. Only the raw value is copied, not the display text.
+     * The whole field is clickable, but only the part which is copied is underlined on hover.
      * Options:
      *   label: display only text in front of the value, e.g. 'Name: '
      *   formattedValue: display only text after the value, shown dimmed
      *   extraClasses: additional css classes
      */
     function createField(cls, value, { label, formattedValue, extraClasses = [] } = {}) {
+        const text = String(value);
         const formattedPart = formattedValue == null ? null : el('span', { className: 'formattedValue' }, ' : ' + formatDisplayText(formattedValue));
 
         const field = el('span', { className: [cls, 'field', ...extraClasses].join(' ') },
             label,
-            formatDisplayText(value),
+            el('span', { className: 'copyValue' }, formatDisplayText(value)),
             formattedPart);
 
-        field.addEventListener('click', () => copyFieldToClipboard(field, String(value)));
+        field.addEventListener('click', () => copyFieldToClipboard(field, text));
+        addCopyTooltip(field, text);
 
         return field;
     }
 
     // a column name which copies itself to the clipboard when clicked
     function createCopyableKey(key) {
-        const keySpan = el('span', { className: 'keySpan copyableKey', title: 'Click to copy the column name' }, key);
+        const keySpan = el('span', { className: 'keySpan copyableKey' }, key);
+        addCopyTooltip(keySpan, key);
 
         keySpan.addEventListener('click', async () => {
             // no copying while editing, same as fields
@@ -585,16 +597,15 @@
         const rows = [];
 
         if (logicalName && hasRecordId) {
-            rows.push(createRow('Form Link', linkSpan(createFormLink(logicalName, recordId))));
-
             if (isSingleRecord) {
                 const editPluralName = await retrievePluralName(logicalName);
                 const id = stripBraces(recordId);
 
+                rows.push(createRow(null, linkSpan(createFormLink(logicalName, recordId))));
                 rows.push(createRow('Edit this row', createEditMenu(view, { logicalName, pluralName: editPluralName, id, isCreateMode: false })));
                 rows.push(createDeleteRow(editPluralName, id));
             } else {
-                rows.push(createRow('Web Api Link', linkSpan(createWebApiLink(recordId, pluralName))));
+                rows.push(createRow(null, linkSpan(createWebApiLink(recordId, pluralName)), ' - ', linkSpan(createFormLink(logicalName, recordId))));
             }
 
             const disassociateLink = relationship ? createDisassociateLink(relationship, pluralName, recordId) : null;
@@ -602,8 +613,7 @@
                 rows.push(createRow('Disassociate this row', linkSpan(disassociateLink)));
             }
         } else if (!isSingleColumnValueOnly && !isCreateMode && logicalName && !hasRecordId) {
-            rows.push(createRow('Form Link', 'Could not generate link'));
-            rows.push(createRow('Web Api Link', 'Could not generate link'));
+            rows.push(createRow(null, 'Could not generate links'));
         }
 
         if (isCreateMode) {
@@ -716,8 +726,10 @@
         const lookupDisplay = el('span', { className: 'lookupDisplay' },
             '{',
             createBlock([
+                // the id is copied when clicked, like any other value, the links open the row
                 createRow(null,
-                    linkSpan(createApiLink(pluralName, id, id)), ' - ',
+                    createField('guid', id, { extraClasses: ['lookupField'] }), ' - ',
+                    linkSpan(createWebApiLink(id, pluralName)), ' - ',
                     linkSpan(createFormLink(lookupLogicalName, guid)), ' - ',
                     linkSpan(actionLink('Preview', () => previewRecord(pluralName, id)))),
                 createRow(null, createField(determineType(formattedValue), formattedValue, { label: 'Name: ' })),
@@ -2242,8 +2254,13 @@
                 color: gray;
             }
 
-            /* copyable values and column names are underlined on hover and flash when copied */
-            .panel:not(.editing) .field:hover, .panel:not(.editing) .copyableKey:hover {
+            /* the part of a field which is copied, it keeps the color of the field (also in dark mode) */
+            .field .copyValue {
+                color: inherit;
+            }
+
+            /* the whole field is clickable, but only the part which is copied is underlined on hover and flashes when copied */
+            .panel:not(.editing) .field:hover .copyValue, .panel:not(.editing) .copyableKey:hover {
                 text-decoration: underline dotted;
             }
 
@@ -2251,7 +2268,7 @@
                 cursor: pointer;
             }
 
-            .field.copied, .copyableKey.copied {
+            .field.copied .copyValue, .copyableKey.copied {
                 background: rgba(128, 128, 128, 0.35);
             }
 
