@@ -486,23 +486,14 @@
     // ---------------------------------------------------------------------
 
     /*
-     * A value which can be copied to the clipboard by clicking it. The raw value is copied, not the display text.
+     * A value which can be copied to the clipboard by clicking it. Only the raw value is copied, not the display text.
      * Options:
      *   label: display only text in front of the value, e.g. 'Name: '
-     *   formattedValue: shown dimmed after the value. Clicking it copies the formatted value instead
+     *   formattedValue: display only text after the value, shown dimmed
      *   extraClasses: additional css classes
      */
     function createField(cls, value, { label, formattedValue, extraClasses = [] } = {}) {
-        const formattedPart = formattedValue == null ? null : el('span', {
-            className: 'formattedValue',
-            title: 'Click to copy the formatted value',
-            on: {
-                click: (e) => {
-                    e.stopPropagation();
-                    copyFieldToClipboard(field, String(formattedValue));
-                }
-            }
-        }, ' : ' + formatDisplayText(formattedValue));
+        const formattedPart = formattedValue == null ? null : el('span', { className: 'formattedValue' }, ' : ' + formatDisplayText(formattedValue));
 
         const field = el('span', { className: [cls, 'field', ...extraClasses].join(' ') },
             label,
@@ -2272,10 +2263,6 @@
             /* the formatted value is secondary to the raw value, so it is dimmed */
             .field .formattedValue {
                 color: gray;
-            }
-
-            .panel:not(.editing) .field .formattedValue:hover {
-                text-decoration: underline dotted;
             }
 
             .panel:not(.editing) .copyableKey {
