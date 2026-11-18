@@ -53,15 +53,8 @@
 
     document.body.appendChild(container);
 
-    // shown once monaco has loaded
-    const editFlowButton = el('button', { type: 'button', style: { display: 'none' } }, 'Edit Flow');
-
-    const toolbar = mainPanel.querySelector('.pfwa-toolbar');
-    if (toolbar) {
-        toolbar.append(editFlowButton);
-    } else {
-        mainPanel.prepend(editFlowButton);
-    }
+    // the 'edit flow' action in the header, disabled until monaco has loaded
+    const editFlowLink = document.querySelector('.editFlowLink');
 
     let regularEditor = null;
     let diffEditor = null;
@@ -239,7 +232,6 @@
         renameTextButton.addEventListener('click', () => runEditorAction('editor.action.startFindReplaceAction'));
         renameThingsButton.addEventListener('click', renameSelection);
         backupFlowButton.addEventListener('click', backupFlow);
-        editFlowButton.addEventListener('click', openEditor);
 
         saveFlowButton.addEventListener('click', async () => {
             if (confirm('Save this flow?')) {
@@ -251,6 +243,8 @@
         // also, reloading makes sure we don't end up with invalid clientdata or anything
         cancelEditFlowButton.addEventListener('click', () => window.location.reload());
 
-        setVisible(editFlowButton, true);
+        editFlowLink.addEventListener('click', openEditor);
+        editFlowLink.classList.remove('disabled');
+        editFlowLink.title = 'Edit the definition of this flow';
     });
 })()

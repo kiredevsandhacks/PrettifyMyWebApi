@@ -126,10 +126,9 @@
         element.classList.toggle('pfwa-hidden', !visible);
     }
 
-    // An anchor that runs a handler instead of navigating
     // An action which runs onClick when clicked. While onClick runs, the action is busy: it stays in place,
     // greyed out, and ignores clicks. Actions never hide themselves, so a double click can't land on
-    // another action that moved under the cursor.
+    // another action that moved under the cursor. An action can also be disabled for longer, e.g. while saving.
     function actionLink(text, onClick, className) {
         const link = el('a', {
             className,
@@ -138,7 +137,7 @@
                 click: async (e) => {
                     e.preventDefault();
 
-                    if (link.classList.contains('busy')) {
+                    if (link.classList.contains('busy') || link.classList.contains('disabled')) {
                         return;
                     }
 
@@ -217,6 +216,7 @@
     // Web Api
     // ---------------------------------------------------------------------
 
+    // GET request for json. With memoize, a successful response is remembered for as long as the page is open
     async function odataFetch(url, memoize) {
         if (memoize && memoizedCalls.hasOwnProperty(url)) {
             return memoizedCalls[url];
@@ -226,7 +226,8 @@
 
         const responseJson = await response.json();
 
-        if (memoize) {
+        // a failed response is not remembered, so the request is retried the next time
+        if (memoize && response.ok) {
             memoizedCalls[url] = responseJson;
         }
 
@@ -322,18 +323,27 @@
         };
     }
 
+    // the rows of a metadata response. Throws the error of Dataverse when the request failed, e.g. a missing privilege
+    function readMetadataRows(json) {
+        if (json.error) {
+            throw new Error(json.error.message);
+        }
+
+        return json.value;
+    }
+
     // validityProperty: IsValidForUpdate, IsValidForCreate
     async function retrieveAttributes(logicalName, validityProperty) {
         const json = await odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes?$filter=${validityProperty} eq true`, true);
 
-        return json.value;
+        return readMetadataRows(json);
     }
 
     // metadataType: PicklistAttributeMetadata, MultiSelectPicklistAttributeMetadata, StateAttributeMetadata, etc.
     async function retrieveOptionSetAttributes(logicalName, metadataType) {
         const json = await odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes/Microsoft.Dynamics.CRM.${metadataType}?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`, true);
 
-        return json.value;
+        return readMetadataRows(json);
     }
 
     async function retrieveEditableAttributes(logicalName, isCreateMode) {
@@ -551,20 +561,53 @@
      *   label: display only text in front of the value, e.g. 'Name: '
      *   formattedValue: display only text after the value, shown dimmed
      *   extraClasses: additional css classes
+     * A very long value, e.g. the description of an email, is cut off at the edge of the page with '…', followed by 'show all'
+     * (not in the header, which cuts off by itself). Clicking the field still copies the full value.
      */
     function createField(cls, value, { label, formattedValue, extraClasses = [] } = {}) {
         const text = String(value);
+        const displayText = formatDisplayText(value);
+        const isLong = displayText.length > longValueLength && !extraClasses.includes('inlineField');
         const formattedPart = formattedValue == null ? null : el('span', { className: 'formattedValue' }, ' : ' + formatDisplayText(formattedValue));
 
-        const field = el('span', { className: [cls, 'field', ...extraClasses].join(' ') },
+        const field = el('span', { className: [cls, 'field', ...extraClasses, isLong ? 'longValue' : null].filter(Boolean).join(' ') },
             label,
-            el('span', { className: 'copyValue' }, formatDisplayText(value)),
+            el('span', { className: 'copyValue' }, displayText),
             formattedPart);
+
+        if (isLong) {
+            field.append(createShowAllLink(field, displayText.length));
+        }
 
         field.copyText = text;
         field.addEventListener('click', () => copyFieldToClipboard(field, text));
 
         return field;
+    }
+
+    // values with more characters than this are cut off, see .longValue
+    const longValueLength = 200;
+
+    // shows all of a value which was cut off, wrapped to the width of the page, or cuts it off again
+    function createShowAllLink(field, length) {
+        const link = el('a', {
+            className: 'showAllLink',
+            href: '#',
+            title: `Show all ${length} characters`,
+            on: {
+                click: (e) => {
+                    e.preventDefault();
+                    e.stopPropagation(); // not a click on the field, which copies it
+
+                    const showAll = field.classList.toggle('showingAll');
+
+                    link.textContent = showAll ? 'show less' : 'show all';
+                    link.title = showAll ? 'Cut it off again' : `Show all ${length} characters`;
+                }
+            }
+        }, 'show all');
+
+        return link;
     }
 
     // a column name which copies itself to the clipboard when clicked
@@ -918,7 +961,7 @@
         };
 
         const header = createHeader();
-        const canCreateOrBrowse = !isPreview && relationship == null && logicalName && !isCreateMode && pluralName !== 'workflows';
+        const canCreateOrBrowse = !isPreview && relationship == null && logicalName && !isCreateMode;
 
         let rows;
         let rowActions = []; // the actions on the main row, its first line
@@ -945,11 +988,11 @@
             } else {
                 header.readContext.append(isPreview ? 'preview ' + logicalName : logicalName);
 
-                // the primary name in bold, e.g. 'contact Amie Gonzales'. Only the table name when the row has no name
+                // the primary name in bold, e.g. 'contact · Amie Gonzales'. Only the table name (and no dot) when the row has no name
                 const primaryName = json[entity.primaryNameAttribute];
 
                 if (primaryName != null && primaryName !== '') {
-                    header.readContext.append(' ', el('b', {}, createField(determineType(primaryName), primaryName, { extraClasses: ['inlineField'] })));
+                    header.readContext.append(el('span', { className: 'separator' }, '·'), el('b', {}, createField(determineType(primaryName), primaryName, { extraClasses: ['inlineField'] })));
                 } else if (isSingleColumnValueOnly) {
                     header.readContext.append(' ', createMuted(location.pathname.split('/').pop()));
                 }
@@ -1005,7 +1048,7 @@
 
         const clientdata = state.originalRecord?.clientdata;
         if (!isMultiple && pluralName === 'workflows' && typeof clientdata === 'string' && clientdata.startsWith('{"')) {
-            createMonacoEditorControls(panel, header.element, singleRecordId, clientdata);
+            createMonacoEditorControls(panel, header, singleRecordId, clientdata);
         }
 
         return { panel, header };
@@ -1064,39 +1107,44 @@
         const saveLink = actionLink('save', async () => {
             setHeaderState('saving');
             await submitEdit(pluralName, id, isCreateMode);
-        });
+        }, 'primaryLink');
         const cancelLink = actionLink('cancel', () => reloadPage(pluralName));
         // below the changes, away from 'save' in the header, so a double click on 'save' does not commit
         const commitLink = actionLink('commit save', async () => {
             const { changes, impersonateHeader } = menu.pendingSave;
             await commitSave(pluralName, id, changes, impersonateHeader, isCreateMode, true);
-        });
+        }, 'primaryLink');
         commitLink.title = 'Save the changes listed above';
         const backLink = actionLink('back', () => resetSubmitControls());
         backLink.title = 'Go back to editing';
 
         const changeCount = createMuted('');
 
-        // editing: save or cancel, confirm: cancel (committing is below the changes), saving: no actions.
-        // The actions are right aligned, so in confirm nothing takes the place of 'save'.
-        // While committing, 'commit save · back' stays in place: commit save is busy (see actionLink) and back is greyed out too.
-        function setHeaderState(headerState) {
-            const actions = {
-                editing: [saveLink, cancelLink],
-                confirm: [cancelLink],
-                saving: [el('span', {}, 'saving…')],
-            };
-            const isCommitting = headerState === 'saving' && menu.pendingSave != null;
+        const savingNote = createMuted(' · saving…');
 
+        // The header always shows 'save · cancel' while editing, so nothing moves under the cursor:
+        // editing: both active, confirm: save disabled (committing is below the changes),
+        // saving: both disabled, until the page is replaced (after a successful save) or the save fails and editing resumes.
+        function setHeaderState(headerState) {
+            const isSaving = headerState === 'saving';
+            const isCommitting = isSaving && menu.pendingSave != null;
+
+            for (const link of [cancelLink, commitLink, backLink]) {
+                link.classList.toggle('disabled', isSaving);
+            }
+
+            saveLink.classList.toggle('disabled', headerState !== 'editing');
+
+            setVisible(savingNote, isSaving);
             setVisible(commitActions, headerState === 'confirm' || isCommitting);
-            backLink.classList.toggle('busy', isCommitting);
-            setActions(header.editActions, actions[headerState]);
         }
 
-        header.editContext.append((isCreateMode ? 'new ' : 'editing ') + logicalName, ' ', changeCount);
+        setActions(header.editActions, [saveLink, cancelLink]);
+
+        header.editContext.append((isCreateMode ? 'new ' : 'editing ') + logicalName, ' ', changeCount, savingNote);
 
         const previewContainer = el('div', { className: 'previewChangesDiv' });
-        const commitActions = el('div', { className: 'commitActions actions pfwa-hidden' }, commitLink, backLink);
+        const commitActions = el('div', { className: 'commitActions actions pfwa-hidden' }, commitLink, backLink); // 'commit save · back', in the same order as 'save · cancel'
 
         const options = el('div', { className: 'editOptions' },
             [previewChanges, bypassPlugins, bypassFlows, impersonate, rememberSettings].map(checkbox => checkbox.label));
@@ -1614,6 +1662,10 @@
         state.mode = isCreateMode ? 'create' : 'update';
 
         try {
+            if (!isCreateMode) {
+                await addMissingStateOrStatus(view, pluralName, id);
+            }
+
             await createEditors(view, logicalName, isCreateMode);
         } catch (error) {
             // show the plain error, and cancel the edit once it is dismissed
@@ -1639,6 +1691,45 @@
         }
 
         updateChangeCount(view, isCreateMode);
+    }
+
+    // A status belongs to a state, so statecode and statuscode are edited together: when the row shows only one of them,
+    // the current value of the other is retrieved and shown next to it, only while editing.
+    async function addMissingStateOrStatus(view, pluralName, id) {
+        const record = state.originalRecord;
+        const present = ['statecode', 'statuscode'].filter(name => name in record);
+
+        if (present.length !== 1 || !view.slots.has(present[0])) {
+            return;
+        }
+
+        const [presentName] = present;
+        const missingName = presentName === 'statecode' ? 'statuscode' : 'statecode';
+
+        const json = await odataFetch(`${apiUrl}${pluralName}(${id})?$select=${missingName}`, false);
+
+        if (json.error) {
+            throw new Error(json.error.message);
+        }
+
+        record[missingName] = json[missingName] ?? null; // the value the change is compared with
+
+        const slotsBefore = [...view.slots];
+        const row = createRow(createCopyableKey(missingName),
+            await renderPropertyValue(json, missingName, { view }, new Set()),
+            createMuted(`  not selected, edited together with ${presentName}`));
+        row.classList.add('editOnly');
+
+        // in the same place as when both are selected: statecode first
+        const presentRow = view.slots.get(presentName).element.closest('.pfwa-row');
+        const missingFirst = missingName === 'statecode';
+        presentRow[missingFirst ? 'before' : 'after'](row);
+
+        // the slots are in the displayed order, so that the changes are listed in that order
+        const missingSlot = view.slots.get(missingName);
+        view.slots = new Map(slotsBefore.flatMap(entry => entry[0] !== presentName
+            ? [entry]
+            : missingFirst ? [[missingName, missingSlot], entry] : [entry, [missingName, missingSlot]]));
     }
 
     // creates an editor for every editable column of the row
@@ -1875,12 +1966,22 @@
 
         menu.setHeaderState('saving');
 
-        const response = await fetch(isCreateMode ? apiUrl + pluralName : apiUrl + pluralName + '(' + id + ')', {
-            method: isCreateMode ? 'POST' : 'PATCH',
-            headers,
-            body: JSON.stringify(Object.fromEntries(changes.map(change => [change.payloadKey, change.newValue])))
-        });
+        let response;
 
+        try {
+            response = await fetch(isCreateMode ? apiUrl + pluralName : apiUrl + pluralName + '(' + id + ')', {
+                method: isCreateMode ? 'POST' : 'PATCH',
+                headers,
+                body: JSON.stringify(Object.fromEntries(changes.map(change => [change.payloadKey, change.newValue])))
+            });
+        } catch (error) {
+            // no response at all, e.g. offline. Nothing was saved, so editing resumes
+            alert(error?.message ?? String(error));
+            resetSubmitControls();
+            return;
+        }
+
+        // the save failed, editing resumes with the changes kept
         if (!response.ok) {
             await alertErrorResponse(response);
             resetSubmitControls();
@@ -1892,12 +1993,22 @@
             const { primaryIdAttribute } = await retrieveEntityInfo(pluralName);
             window.location.href = apiUrl + pluralName + '(' + json[primaryIdAttribute] + ')#p';
         } else {
-            reloadPage(pluralName);
+            await reloadPage(pluralName);
         }
+
+        // the actions stay disabled until the page is replaced
     }
 
     async function handleCreateNewRecord(logicalName) {
-        const creatableAttributes = await retrieveAttributes(logicalName, 'IsValidForCreate');
+        let creatableAttributes;
+
+        try {
+            creatableAttributes = await retrieveAttributes(logicalName, 'IsValidForCreate');
+        } catch (error) {
+            alert(error.message);
+            return;
+        }
+
         const emptyRecord = {};
 
         for (const attribute of creatableAttributes) {
@@ -2137,11 +2248,20 @@
         document.head.appendChild(el('script', { type: 'text/javascript', src: chrome.runtime.getURL(path), on: onLoad ? { load: onLoad } : {} }));
     }
 
+    // Adds 'edit flow' to the actions in the header. It is disabled until the editor has loaded:
+    // the editor runs in the page context (initMonaco.js), which activates the link and handles its clicks.
     function createMonacoEditorControls(mainPanel, header, recordId, clientdata) {
         if (checkIfJsonViewerEnabled()) {
-            header.append(el('button', { type: 'button', disabled: true }, 'Currently, editing Flows is only possible in Chrome. Work in progress.'));
+            header.readActions.append(el('span', { className: 'muted', title: 'Currently, editing Flows is only possible in Chrome. Work in progress.' }, 'edit flow'));
             return;
         }
+
+        header.readActions.append(el('a', {
+            className: 'editFlowLink disabled',
+            href: '#',
+            title: 'Loading the flow editor…',
+            on: { click: (e) => e.preventDefault() }
+        }, 'edit flow'));
 
         // the editor runs in the page context, pass the data it needs through the dataset
         Object.assign(mainPanel.dataset, {
@@ -2229,6 +2349,21 @@
                 margin-left: auto;
             }
 
+            /* what is shown on the left takes the space next to the actions, and a long text is cut off with '…'.
+               Only when even 20 characters do not fit, the actions move below it */
+            .headerContext {
+                flex: 1 1 20ch;
+                min-width: 0;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+            }
+
+            /* plain inline text, so that the '…' cuts off the name itself instead of hiding it as a whole */
+            .headerContext .field, .headerContext .field > * {
+                display: inline;
+            }
+
             /* while editing, below the line: the options, the impersonation inputs and the changes to commit */
             .headerBody {
                 flex-basis: 100%;
@@ -2246,16 +2381,6 @@
 
             .previewChangesDiv:empty {
                 display: none;
-            }
-
-            .pfwa-toolbar button {
-                height: 22px;
-                padding: 0 6px;
-                cursor: pointer;
-            }
-
-            .pfwa-toolbar button:disabled {
-                cursor: default;
             }
 
             @media (prefers-color-scheme: dark) {
@@ -2286,8 +2411,16 @@
                 pointer-events: none;
             }
 
+            /* the same dot between other parts, e.g. the table name and the primary name in the header */
+            .separator {
+                display: inline-block;
+                width: 3ch;
+                text-align: center;
+                color: gray;
+            }
+
             @media (prefers-color-scheme: dark) {
-                .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden)::before {
+                .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden)::before, .separator {
                     color: #8c8c8c;
                 }
             }
@@ -2306,8 +2439,40 @@
                 color: firebrick;
             }
 
-            /* an action which is running, see actionLink */
-            a.busy, a.dangerLink.busy {
+            /* the actions which save, bold so they draw the eye (and in dark mode in the yellow of the logo) */
+            a.primaryLink {
+                font-weight: bold;
+            }
+
+            /* every active link or action changes colour on hover. In light mode to a deep, saturated blue,
+               and delete to pure red. In dark mode it gets lighter, see below */
+            a[href]:not(.busy, .disabled):hover {
+                color: #0000aa;
+            }
+
+            a.dangerLink[href]:not(.busy, .disabled):hover {
+                color: #ff0000;
+            }
+
+            button:not(:disabled):hover {
+                filter: brightness(0.92);
+            }
+
+            /* links which open a new tab get the familiar icon, drawn in the colour of the link */
+            a[target="_blank"][href]::after {
+                content: '';
+                display: inline-block; /* not underlined with the link */
+                width: 0.8em;
+                height: 0.8em;
+                margin-left: 0.25em;
+                vertical-align: -0.05em;
+                background-color: currentColor;
+                -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z'/%3E%3C/svg%3E") no-repeat center / contain;
+                mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z'/%3E%3C/svg%3E") no-repeat center / contain;
+            }
+
+            /* an action which is running or disabled, see actionLink */
+            a.busy, a.disabled, a.dangerLink.busy, a.dangerLink.disabled, a.primaryLink.busy, a.primaryLink.disabled {
                 color: gray;
                 cursor: progress;
             }
@@ -2318,11 +2483,33 @@
                 }
 
                 a.dangerLink {
-                    color: #ff7b72;
+                    color: #ff5c5c;
                 }
 
-                a.busy, a.dangerLink.busy {
+                /* the yellow of the logo, softened */
+                a.primaryLink {
+                    color: #e3dc6a;
+                }
+
+                a.busy, a.disabled, a.dangerLink.busy, a.dangerLink.disabled, a.primaryLink.busy, a.primaryLink.disabled {
                     color: #8c8c8c;
+                }
+
+                a[href]:not(.busy, .disabled):hover {
+                    color: #8ab4f8;
+                }
+
+                a.dangerLink[href]:not(.busy, .disabled):hover {
+                    color: #ff7575;
+                }
+
+                /* the same yellow, paler */
+                a.primaryLink[href]:not(.busy, .disabled):hover {
+                    color: #efeaa0;
+                }
+
+                button:not(:disabled):hover {
+                    filter: brightness(1.6);
                 }
             }
 
@@ -2415,7 +2602,7 @@
             .boolean { color: blue; }
             .null { color: magenta; }
             .guid { color: firebrick; }
-            .primarykey { color: tomato; }
+            .primarykey { color: #0000EE; }
 
             @media (prefers-color-scheme: dark) {
             *:not(svg, path, a) {
@@ -2520,6 +2707,73 @@
                 background: rgba(128, 128, 128, 0.35);
             }
 
+            /* a very long value is cut off at the edge of the page with '…', followed by 'show all', see createField.
+               Its row becomes a flex row, so the value can shrink to the space left after the column name */
+            .pfwa-row:has(> .longValue:not(.showingAll)), .pfwa-row > b:has(> .longValue:not(.showingAll)) {
+                display: flex;
+            }
+
+            .longValue:not(.showingAll), .pfwa-row > b:has(> .longValue:not(.showingAll)) {
+                min-width: 0;
+            }
+
+            .longValue:not(.showingAll) > .copyValue {
+                display: block; /* also cut off while editing, when a memo field is not a flex box */
+                min-width: 0;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+            }
+
+            .longValue > :not(.copyValue) {
+                flex: none;
+            }
+
+            .showAllLink {
+                margin-left: 1ch;
+            }
+
+            /* while editing, the editor shows all of the value */
+            .editing .showAllLink {
+                display: none;
+            }
+
+            /* While editing a long memo value, its textarea goes on a line of its own below the row, at the same distance
+               from the left as the textarea of a short memo value. The parts of the field become parts of the flex row,
+               with an empty line break (the ::after of the row) between the value and the textarea */
+            .editing .pfwa-row:has(> .longValue.memoField:not(.showingAll)) {
+                flex-wrap: wrap;
+                padding-bottom: 1lh; /* the same space below the textarea as a short memo value has (an empty line) */
+            }
+
+            .editing .pfwa-row:has(> .longValue.memoField:not(.showingAll))::after {
+                content: '';
+                flex-basis: 100%;
+                order: 1;
+            }
+
+            .editing .longValue.memoField:not(.showingAll) {
+                display: contents;
+            }
+
+            .editing .longValue.memoField:not(.showingAll) > .copyValue {
+                flex: 1 1 0;
+            }
+
+            .editing .longValue.memoField:not(.showingAll) > textarea {
+                order: 2;
+            }
+
+            /* all of a long value, wrapped to the width of the page instead of one very long line */
+            .field.showingAll {
+                display: inline;
+            }
+
+            .field.showingAll .copyValue {
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+            }
+
             @media (prefers-color-scheme: dark) {
                 .field .formattedValue {
                     color: #8c8c8c;
@@ -2545,8 +2799,11 @@
                 height: 20px;
             }
 
+            /* the textarea goes below the value, and the row grows with it.
+               (A long value makes its row a flex row, in which the field is a block, so it needs the height as well) */
             .editing .field.memoField {
                 display: inline;
+                height: auto;
             }
 
             .editing .field.memoField textarea {
