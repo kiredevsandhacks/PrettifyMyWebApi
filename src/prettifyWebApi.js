@@ -88,9 +88,9 @@
     // ---------------------------------------------------------------------
 
     // Creates an element. Children can be nodes, strings (become text nodes), arrays, or null/false (skipped).
-    // Options: className, dataset, style, attributes, on (event handlers), and any other element property.
+    // Options: className, dataset, style, on (event handlers), and any other element property.
     function el(tag, options = {}, ...children) {
-        const { className, dataset, style, attributes, on, ...properties } = options;
+        const { className, dataset, style, on, ...properties } = options;
         const element = document.createElement(tag);
 
         if (className) {
@@ -101,9 +101,6 @@
         }
         if (style) {
             Object.assign(element.style, style);
-        }
-        for (const [name, value] of Object.entries(attributes ?? {})) {
-            element.setAttribute(name, value);
         }
         for (const [eventName, handler] of Object.entries(on ?? {})) {
             element.addEventListener(eventName, handler);
