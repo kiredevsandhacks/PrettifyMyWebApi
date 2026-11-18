@@ -1838,10 +1838,32 @@
     // Preview
     // ---------------------------------------------------------------------
 
-    async function previewRecord(pluralName, id) {
-        const mainPanel = state.mainView.panel;
+    // While previewing, the main panel scrolls by itself instead of the page. These keep the same rows in view when switching.
+    function enterPreviewLayout(mainPanel) {
+        if (mainPanel.classList.contains('prePreviewed')) {
+            return; // already previewing another row, the main panel keeps its own scroll position
+        }
+
+        const scrolledPastPanelTop = -mainPanel.getBoundingClientRect().top;
+
         mainPanel.classList.add('prePreviewed');
         document.body.classList.add('bodyPreviewed');
+
+        mainPanel.scrollTop = scrolledPastPanelTop;
+    }
+
+    function leavePreviewLayout(mainPanel) {
+        const scrolledPastPanelTop = mainPanel.scrollTop;
+
+        mainPanel.classList.remove('prePreviewed');
+        document.body.classList.remove('bodyPreviewed');
+
+        window.scrollTo(window.scrollX, mainPanel.getBoundingClientRect().top + window.scrollY + scrolledPastPanelTop);
+    }
+
+    async function previewRecord(pluralName, id) {
+        const mainPanel = state.mainView.panel;
+        enterPreviewLayout(mainPanel);
 
         const previewPanel = el('div', { className: 'panel previewPanel prePreviewed' });
         document.body.appendChild(previewPanel);
@@ -1852,14 +1874,14 @@
 
         toolbar.append(createToolbarButton('Close Preview', () => {
             if (document.getElementsByClassName('previewPanel').length === 1) {
-                mainPanel.classList.remove('prePreviewed');
-                document.body.classList.remove('bodyPreviewed');
+                leavePreviewLayout(mainPanel);
             }
 
             previewPanel.remove();
         }));
 
-        previewPanel.scrollIntoView();
+        // only scroll sideways to bring the preview into view (when there are multiple), never the main panel
+        previewPanel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
 
     // ---------------------------------------------------------------------
