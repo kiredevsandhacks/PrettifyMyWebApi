@@ -33,9 +33,6 @@
         'OData-Version': '4.0',
     };
 
-    const svgNamespace = 'http://www.w3.org/2000/svg';
-    const clipboardIconPath = 'M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1s-1-.45-1-1s.45-1 1-1zm7 18H5V4h2v3h10V4h2v16z';
-    const clipboardCopiedIconPath = 'M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1s-1-.45-1-1s.45-1 1-1zm-2 14l-4-4l1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z';
 
     // maps Dataverse attribute types to the data type of a plain text input
     const textInputTypes = {
@@ -147,19 +144,6 @@
         return el('span', { className: 'pf-link' }, children);
     }
 
-    function createSvgIcon(className, pathData) {
-        const svg = document.createElementNS(svgNamespace, 'svg');
-        svg.setAttribute('class', className);
-        svg.setAttribute('viewBox', '0 0 24 24');
-
-        const path = document.createElementNS(svgNamespace, 'path');
-        path.setAttribute('fill', 'currentColor');
-        path.setAttribute('d', pathData);
-
-        svg.appendChild(path);
-        return svg;
-    }
-
     function createToolbarButton(label, onClick) {
         return el('button', { type: 'button', on: { click: onClick } }, label);
     }
@@ -176,11 +160,6 @@
         return el('div', { className: 'pfwa-block' }, rows);
     }
 
-    // created once and cloned for every field
-    const copyButtonTemplate = el('span', { className: 'copyButton' }, createSvgIcon('copyIcon', clipboardIconPath));
-    const copiedNotificationTemplate = el('span', { className: 'copiedNotification' },
-        createSvgIcon('copiedIcon', clipboardCopiedIconPath),
-        el('span', { className: 'copiedText' }, 'Copied!'));
 
     // ---------------------------------------------------------------------
     // Web Api
@@ -498,9 +477,7 @@
         const field = el('span', { className: [cls, 'field', ...extraClasses].join(' ') },
             label,
             formatDisplayText(value),
-            formattedPart,
-            copyButtonTemplate.cloneNode(true),
-            copiedNotificationTemplate.cloneNode(true));
+            formattedPart);
 
         field.addEventListener('click', () => copyFieldToClipboard(field, String(value)));
 
@@ -2180,7 +2157,7 @@
             .primarykey { color: tomato; }
 
             @media (prefers-color-scheme: dark) {
-            *:not(svg, .copyButton, path, a) {
+            *:not(svg, path, a) {
                 color: #d3d3d3f2;
             }
 
@@ -2265,15 +2242,16 @@
                 color: gray;
             }
 
+            /* copyable values and column names are underlined on hover and flash when copied */
+            .panel:not(.editing) .field:hover, .panel:not(.editing) .copyableKey:hover {
+                text-decoration: underline dotted;
+            }
+
             .panel:not(.editing) .copyableKey {
                 cursor: pointer;
             }
 
-            .panel:not(.editing) .copyableKey:hover {
-                text-decoration: underline dotted;
-            }
-
-            .copyableKey.copied {
+            .field.copied, .copyableKey.copied {
                 background: rgba(128, 128, 128, 0.35);
             }
 
@@ -2281,44 +2259,6 @@
                 .field .formattedValue {
                     color: #8c8c8c;
                 }
-            }
-
-            .copyButton {
-                color: dimgray;
-                display: none;
-                cursor: pointer;
-            }
-
-            @media (prefers-color-scheme: dark) {
-                .copyButton {
-                    color: darkgray;
-                }
-            }
-
-            .panel:not(.editing) .field:hover .copyButton {
-                display: unset;
-            }
-
-            .copyIcon, .copiedIcon {
-                width: 16px;
-                position: absolute;
-                padding-left: 4px;
-            }
-
-            .copiedNotification {
-                display: none;
-            }
-
-            .field.copied .copiedNotification {
-                display: unset;
-            }
-
-            .field.copied .copyIcon {
-                display: none;
-            }
-
-            .copiedText {
-                padding-left: 24px;
             }
 
             /* edit mode */
