@@ -15,6 +15,8 @@
     const etagKey = '@odata.etag';
     const totalRecordCountKey = '@Microsoft.Dynamics.CRM.totalrecordcount';
     const totalRecordCountLimitExceededKey = '@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded';
+    const odataCountKey = '@odata.count';
+    const nextLinkKey = '@odata.nextLink';
 
     const annotationTypes = [formattedValueType, navigationPropertyType, lookupType];
     const hiddenKeys = [contextKey, metaDataKey, etagKey];
@@ -163,8 +165,9 @@
     }
 
     // a row of the json-like output, e.g. 'key: value'. Pass null as key for array items.
+    // The key can be a string or a node, e.g. a copyable key.
     function createRow(key, ...content) {
-        const keyNodes = key == null ? null : [el('span', { className: 'keySpan' }, key), ': '];
+        const keyNodes = key == null ? null : [typeof key === 'string' ? el('span', { className: 'keySpan' }, key) : key, ': '];
         return el('div', { className: 'pfwa-row' }, keyNodes, content);
     }
 
@@ -482,22 +485,62 @@
     // Fields
     // ---------------------------------------------------------------------
 
-    // a value which can be copied to the clipboard by clicking it
-    function createField(cls, value, ...extraClasses) {
-        const text = formatDisplayText(value);
+    /*
+     * A value which can be copied to the clipboard by clicking it. The raw value is copied, not the display text.
+     * Options:
+     *   label: display only text in front of the value, e.g. 'Name: '
+     *   formattedValue: shown dimmed after the value. Clicking it copies the formatted value instead
+     *   extraClasses: additional css classes
+     */
+    function createField(cls, value, { label, formattedValue, extraClasses = [] } = {}) {
+        const formattedPart = formattedValue == null ? null : el('span', {
+            className: 'formattedValue',
+            title: 'Click to copy the formatted value',
+            on: {
+                click: (e) => {
+                    e.stopPropagation();
+                    copyFieldToClipboard(field, String(formattedValue));
+                }
+            }
+        }, ' : ' + formatDisplayText(formattedValue));
+
         const field = el('span', { className: [cls, 'field', ...extraClasses].join(' ') },
-            text,
+            label,
+            formatDisplayText(value),
+            formattedPart,
             copyButtonTemplate.cloneNode(true),
             copiedNotificationTemplate.cloneNode(true));
 
-        field.addEventListener('click', () => copyFieldToClipboard(field, text));
+        field.addEventListener('click', () => copyFieldToClipboard(field, String(value)));
 
         return field;
     }
 
+    // a column name which copies itself to the clipboard when clicked
+    function createCopyableKey(key) {
+        const keySpan = el('span', { className: 'keySpan copyableKey', title: 'Click to copy the column name' }, key);
+
+        keySpan.addEventListener('click', async () => {
+            // no copying while editing, same as fields
+            if (keySpan.closest('.editing')) {
+                return;
+            }
+
+            try {
+                await navigator.clipboard.writeText(key);
+                keySpan.classList.add('copied');
+                setTimeout(() => keySpan.classList.remove('copied'), 400);
+            } catch {
+                alert('Failed to copy');
+            }
+        });
+
+        return keySpan;
+    }
+
     // a field which gets an input appended when the row is edited
-    function createEditableField(cls, value, fieldName, view) {
-        const field = createField(cls, value);
+    function createEditableField(cls, value, fieldName, view, fieldOptions) {
+        const field = createField(cls, value, fieldOptions);
 
         view?.slots.set(fieldName, { kind: 'field', fieldName, element: field });
 
@@ -630,7 +673,7 @@
                 // an annotation without a matching column
                 nestedRows.push(createRow(key, formatDisplayText(value)));
             } else {
-                columnRows.push(createRow(key, await renderPropertyValue(record, key, options, consumedKeys)));
+                columnRows.push(createRow(createCopyableKey(key), await renderPropertyValue(record, key, options, consumedKeys)));
             }
         }
 
@@ -663,7 +706,7 @@
 
         if (key.startsWith('_') && key.endsWith('_value')) {
             // a lookup without a value
-            return [createField(cls, value, 'lookupField'), createLookupSlot(view, key, null, null)];
+            return [createField(cls, value, { extraClasses: ['lookupField'] }), createLookupSlot(view, key, null, null)];
         }
 
         const formattedValue = record[key + formattedValueType];
@@ -671,9 +714,9 @@
             consumedKeys.add(key + formattedValueType);
 
             // toString the value because it can be a number. The formattedValue is always a string
-            const text = value?.toString() !== formattedValue ? value + ' : ' + formattedValue : value;
+            const isDifferent = value?.toString() !== formattedValue;
 
-            return createEditableField(cls, text, key, view);
+            return createEditableField(cls, value, key, view, isDifferent ? { formattedValue } : undefined);
         }
 
         if (options.logicalName !== 'solution' && key === 'solutionid' && value != null) {
@@ -709,14 +752,14 @@
                     linkSpan(createApiLink(pluralName, id, id)), ' - ',
                     linkSpan(createFormLink(lookupLogicalName, guid)), ' - ',
                     linkSpan(actionLink('Preview', () => previewRecord(pluralName, id)))),
-                createRow(null, createField(determineType(formattedValue), 'Name: ' + formattedValue)),
-                createRow(null, createField(determineType(lookupLogicalName), 'LogicalName: ' + lookupLogicalName)),
-                createRow(null, createField(determineType(navigationProperty), 'NavigationProperty: ' + navigationProperty)),
+                createRow(null, createField(determineType(formattedValue), formattedValue, { label: 'Name: ' })),
+                createRow(null, createField(determineType(lookupLogicalName), lookupLogicalName, { label: 'LogicalName: ' })),
+                createRow(null, createField(determineType(navigationProperty), navigationProperty, { label: 'NavigationProperty: ' })),
             ]),
             '}');
 
         // in edit mode, only the name is displayed
-        const lookupName = el('span', { className: 'lookupEdit' }, createField('string', formattedValue, 'lookupField'));
+        const lookupName = el('span', { className: 'lookupEdit' }, createField('string', formattedValue, { extraClasses: ['lookupField'] }));
 
         return [lookupDisplay, lookupName, createLookupSlot(view, key, guid, lookupLogicalName)];
     }
@@ -731,7 +774,12 @@
             }
 
             const value = json[key];
-            rows.push(createRow(key, isObject(value) ? await renderNestedValue(value) : formatDisplayText(value)));
+
+            if (key === nextLinkKey && typeof value === 'string') {
+                rows.push(createRow(key, createNextPageLink(value)));
+            } else {
+                rows.push(createRow(key, isObject(value) ? await renderNestedValue(value) : formatDisplayText(value)));
+            }
         }
 
         const records = [];
@@ -739,9 +787,28 @@
             records.push(createRow(null, '{', createBlock(await renderRecordRows(record, options)), '}'));
         }
 
-        rows.push(createRow(`value (${json.value.length} rows)`, '[', createBlock(records), ']'));
+        rows.push(createRow(`value (${describeRowCount(json)})`, '[', createBlock(records), ']'));
 
         return rows;
+    }
+
+    // the next page opens in the same tab, like paging usually does
+    function createNextPageLink(nextLink) {
+        return [linkSpan(el('a', { href: nextLink + '#p' }, 'Next page')), '  ', createField('string', nextLink)];
+    }
+
+    // e.g. '50 rows', '50 of 1234 rows' or '50 of 5000+ rows'
+    // The total count is only known when it is requested with $count=true, it is -1 otherwise
+    function describeRowCount(json) {
+        const rowCount = json.value.length;
+        const totalCount = isNumber(json[odataCountKey]) ? json[odataCountKey] : json[totalRecordCountKey];
+        const isLimitExceeded = json[totalRecordCountLimitExceededKey] === true;
+
+        if (!isNumber(totalCount) || totalCount < 0 || (totalCount === rowCount && !isLimitExceeded)) {
+            return `${rowCount} rows`;
+        }
+
+        return `${rowCount} of ${totalCount}${isLimitExceeded ? '+' : ''} rows`;
     }
 
     // Determines whether the url browses a relationship, e.g. /accounts(id)/contact_customer_accounts
@@ -1839,6 +1906,8 @@
             relationshipsDiv));
 
         renderRelationships(relationshipsDiv, relationships, null, logicalName);
+
+        filterInput.focus();
     }
 
     function filterRelationships(relationships, fields, filter) {
@@ -1846,9 +1915,12 @@
     }
 
     function renderRelationships(container, relationships, filter, logicalName) {
-        let manyToMany = relationships.ManyToManyRelationships;
-        let oneToMany = relationships.OneToManyRelationships;
-        let manyToOne = relationships.ManyToOneRelationships;
+        const all = {
+            manyToMany: relationships.ManyToManyRelationships,
+            oneToMany: relationships.OneToManyRelationships,
+            manyToOne: relationships.ManyToOneRelationships,
+        };
+        let { manyToMany, oneToMany, manyToOne } = all;
 
         if (filter) {
             const lowerCaseFilter = filter.toLowerCase();
@@ -1858,22 +1930,28 @@
             manyToOne = filterRelationships(manyToOne, relationshipFilterFields.oneToMany, lowerCaseFilter);
         }
 
+        // e.g. 'One to Many Relationships (37)' or, when filtered, 'One to Many Relationships (3 of 37)'
+        const heading = (title, shown, total, unit = '') =>
+            el('h2', {}, `${title} (${shown.length === total.length ? total.length : `${shown.length} of ${total.length}`}${unit})`);
+
         container.replaceChildren();
         appendChildren(container, [
-            el('h2', {}, 'Many to Many Relationships'),
+            heading('Many to Many Relationships', manyToMany, all.manyToMany),
             manyToMany.map(r => createManyToManyRelationshipLink(r, logicalName)),
-            el('h2', {}, 'Many to One Relationships (lookups)'),
+            heading('Many to One Relationships', manyToOne, all.manyToOne, ' lookups'),
             manyToOne.map(r => createManyToOneRelationshipLink(r, logicalName)),
-            el('h2', {}, 'One to Many Relationships'),
+            heading('One to Many Relationships', oneToMany, all.oneToMany),
             oneToMany.map(r => createOneToManyRelationshipLink(r, logicalName))
         ]);
     }
 
     function createManyToManyRelationshipLink(relationship, logicalName) {
-        if (relationship.Entity1LogicalName === logicalName) {
-            return createRelationshipLink(relationship.Entity1NavigationPropertyName);
-        } else if (relationship.Entity2LogicalName === logicalName) {
-            return createRelationshipLink(relationship.Entity2NavigationPropertyName);
+        const { Entity1LogicalName, Entity2LogicalName, IntersectEntityName } = relationship;
+
+        if (Entity1LogicalName === logicalName) {
+            return createRelationshipItem(relationship.Entity1NavigationPropertyName, `${Entity2LogicalName} (via ${IntersectEntityName})`).element;
+        } else if (Entity2LogicalName === logicalName) {
+            return createRelationshipItem(relationship.Entity2NavigationPropertyName, `${Entity1LogicalName} (via ${IntersectEntityName})`).element;
         }
 
         alert(`Could find the navigation property for many to many relationship ${relationship.SchemaName}`);
@@ -1887,28 +1965,32 @@
         }
 
         const navigationProperty = relationship.ReferencingEntityNavigationPropertyName;
-        const link = createRelationshipLink(navigationProperty);
+        const item = createRelationshipItem(navigationProperty, `${relationship.ReferencedEntity} (via ${relationship.ReferencingAttribute})`);
 
         // there is nothing to browse when the lookup is empty
         if (state.originalRecord['_' + navigationProperty + '_value'] == null && !state.foundNavigationProperties.includes(navigationProperty)) {
-            link.removeAttribute('href');
-            link.classList.add('disabledLink');
+            item.link.removeAttribute('href');
+            item.link.classList.add('disabledLink');
         }
 
-        return link;
+        return item.element;
     }
 
     function createOneToManyRelationshipLink(relationship, logicalName) {
         if (relationship.ReferencedEntity === logicalName) {
-            return createRelationshipLink(relationship.ReferencedEntityNavigationPropertyName);
+            return createRelationshipItem(relationship.ReferencedEntityNavigationPropertyName, `${relationship.ReferencingEntity}.${relationship.ReferencingAttribute}`).element;
         }
 
         alert(`Could find the navigation property for one to many relationship '${relationship.SchemaName}'`);
         return null;
     }
 
-    function createRelationshipLink(navigationProperty) {
-        return el('a', { className: 'relationshipLink', target: '_blank', href: window.location.pathname + '/' + navigationProperty + '#pr' }, navigationProperty);
+    // the navigation property link, followed by the related table in muted text
+    function createRelationshipItem(navigationProperty, target) {
+        const link = el('a', { className: 'relationshipLink', target: '_blank', href: window.location.pathname + '/' + navigationProperty + '#pr' }, navigationProperty);
+        const element = el('div', { className: 'relationshipItem' }, link, el('span', { className: 'relationshipTarget' }, '  → ' + target));
+
+        return { link, element };
     }
 
     // ---------------------------------------------------------------------
@@ -2003,13 +2085,17 @@
                 padding-left: 3ch;
             }
 
+            /* a zero height strip which sticks to the top of the scroll container, so the buttons stay in view */
             .pfwa-toolbar {
-                position: absolute;
-                top: 20px;
-                right: 28px;
+                position: sticky;
+                top: 10px;
+                height: 0;
+                z-index: 10;
                 display: flex;
                 flex-direction: row-reverse;
+                align-items: flex-start;
                 gap: 18px;
+                padding: 0 18px;
             }
 
             .pfwa-toolbar button {
@@ -2086,9 +2172,12 @@
                 display: grid;
             }
 
-            .relationshipLink {
+            .relationshipItem {
                 margin: 4px 0px;
-                width: fit-content;
+            }
+
+            #relationshipBrowser .relationshipTarget {
+                color: gray;
             }
 
             .disabledLink {
@@ -2103,6 +2192,10 @@
 
                 .disabledLink {
                     color: #E9E9E9;
+                }
+
+                #relationshipBrowser .relationshipTarget {
+                    color: #8c8c8c;
                 }
             }
 
@@ -2194,6 +2287,33 @@
             .panel .field:not(.lookupField), .panel .lookupDisplay {
                 margin-right: 24px;
                 padding-right: 16px;
+            }
+
+            /* the formatted value is secondary to the raw value, so it is dimmed */
+            .field .formattedValue {
+                color: gray;
+            }
+
+            .panel:not(.editing) .field .formattedValue:hover {
+                text-decoration: underline dotted;
+            }
+
+            .panel:not(.editing) .copyableKey {
+                cursor: pointer;
+            }
+
+            .panel:not(.editing) .copyableKey:hover {
+                text-decoration: underline dotted;
+            }
+
+            .copyableKey.copied {
+                background: rgba(128, 128, 128, 0.35);
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .field .formattedValue {
+                    color: #8c8c8c;
+                }
             }
 
             .copyButton {
@@ -2325,21 +2445,19 @@
                 display:block;
             }
 
-            .mainPanel, .previewPanel {
-                position: relative;
-            }
-
             .bodyPreviewed {
                 display: inline-flex;
                 margin-top: 0px;
                 margin-bottom: 0px;
             }
 
+            /* side by side panels which scroll independently, so their toolbars stay in view */
             .prePreviewed {
                 width: 48vw;
                 overflow-x: scroll !important;
                 overflow-y: scroll !important;
-                height: 100%;
+                height: 100vh;
+                box-sizing: border-box;
                 margin: 0px;
             }
 
