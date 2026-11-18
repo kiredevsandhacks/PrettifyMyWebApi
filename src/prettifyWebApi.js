@@ -945,8 +945,11 @@
             } else {
                 header.readContext.append(isPreview ? 'preview ' + logicalName : logicalName);
 
-                if (hasRecordId) {
-                    header.readContext.append(' ', createField('guid', stripBraces(singleRecordId), { extraClasses: ['inlineField'] }));
+                // the primary name in bold, e.g. 'contact Amie Gonzales'. Only the table name when the row has no name
+                const primaryName = json[entity.primaryNameAttribute];
+
+                if (primaryName != null && primaryName !== '') {
+                    header.readContext.append(' ', el('b', {}, createField(determineType(primaryName), primaryName, { extraClasses: ['inlineField'] })));
                 } else if (isSingleColumnValueOnly) {
                     header.readContext.append(' ', createMuted(location.pathname.split('/').pop()));
                 }
