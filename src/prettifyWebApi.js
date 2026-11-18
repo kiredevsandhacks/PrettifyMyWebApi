@@ -144,8 +144,53 @@
         return el('span', { className: 'pf-link' }, children);
     }
 
-    function createToolbarButton(label, onClick) {
-        return el('button', { type: 'button', on: { click: onClick } }, label);
+    /*
+     * Layout rule: an action sits on the line of the thing it acts on.
+     * - actions on a row (or lookup) are the first line inside its braces: '{' / 'new tab · form' / 'key: value' / '}'
+     * - actions on the page are in the header, the sticky line at the top of a panel
+     * The data itself is only 'key: value'.
+     */
+
+    // separates actions with ' · ', e.g. 'new tab · form · preview'
+    function joinActions(actions) {
+        return actions.filter(Boolean).flatMap((action, i) => i === 0 ? [action] : [' · ', action]);
+    }
+
+    // secondary text, e.g. the row count in the header
+    function createMuted(text) {
+        return el('span', { className: 'muted' }, text);
+    }
+
+    // the actions on a row, as the first line inside its braces, e.g. 'new tab · form · preview'
+    function createActionRow(actions, extraClass) {
+        const visibleActions = actions.filter(Boolean);
+        return visibleActions.length === 0 ? null : el('div', { className: ['pfwa-row', 'actionRow', extraClass].filter(Boolean).join(' ') }, joinActions(visibleActions));
+    }
+
+    // actions after a value on the same line, e.g. a solutionid's 'new tab'
+    function createInlineActions(actions) {
+        return el('span', { className: 'inlineActions' }, joinActions(actions));
+    }
+
+    // The sticky line at the top of a panel: what is shown on the left, the actions on the page on the right.
+    // The read parts are shown normally, the edit parts while editing (see .readOnly and .editOnly).
+    // While editing, the edit options and the changes to commit are shown below the line.
+    function createHeader() {
+        const header = {
+            readContext: el('span', { className: 'headerContext readOnly' }),
+            editContext: el('span', { className: 'headerContext editOnly' }),
+            readActions: el('span', { className: 'headerActions readOnly' }),
+            editActions: el('span', { className: 'headerActions editOnly' }),
+            editBody: el('div', { className: 'headerBody editOnly' }), // below the line: the edit options and the changes to commit
+        };
+
+        header.element = el('div', { className: 'pfwa-toolbar' }, header.readContext, header.editContext, header.readActions, header.editActions, header.editBody);
+
+        return header;
+    }
+
+    function setActions(container, actions) {
+        container.replaceChildren(...joinActions(actions));
     }
 
     // a row of the json-like output, e.g. 'key: value'. Pass null as key for array items.
@@ -425,13 +470,32 @@
     // Links
     // ---------------------------------------------------------------------
 
+    // Action labels are short and lowercase, the tooltip explains what they do
+
     // opens the row in the Web Api in a new tab
     function createWebApiLink(guid, pluralName) {
-        return el('a', { target: '_blank', href: `${apiUrl}${pluralName}(${stripBraces(guid)})#p` }, 'Open in new tab');
+        return el('a', { target: '_blank', title: 'Open this row in the Web Api in a new tab', href: `${apiUrl}${pluralName}(${stripBraces(guid)})#p` }, 'new tab');
     }
 
     function createFormLink(logicalName, guid) {
-        return el('a', { target: '_blank', href: `/main.aspx?etn=${logicalName}&id=${guid}&pagetype=entityrecord` }, 'Open in Form');
+        return el('a', { target: '_blank', title: 'Open this row in a form in a new tab', href: `/main.aspx?etn=${logicalName}&id=${guid}&pagetype=entityrecord` }, 'form');
+    }
+
+    // the actions on a row of a collection or a preview, e.g. 'new tab · form · disassociate'
+    function createRowActions(logicalName, pluralName, recordId, relationship) {
+        if (!logicalName) {
+            return [];
+        }
+
+        if (recordId == null || recordId === '') {
+            return [el('span', { className: 'muted' }, 'could not generate links')];
+        }
+
+        return [
+            createWebApiLink(recordId, pluralName),
+            createFormLink(logicalName, recordId),
+            relationship ? createDisassociateLink(relationship, pluralName, recordId) : null
+        ];
     }
 
     function createDisassociateLink(relationship, pluralName, recordId) {
@@ -448,11 +512,12 @@
             return null;
         }
 
-        const link = actionLink('Disassociate this row', async () => {
+        const link = actionLink('disassociate', async () => {
             setVisible(link, false);
             await disassociate();
             setVisible(link, true);
-        });
+        }, 'dangerLink');
+        link.title = 'Remove the relationship between this row and the parent row';
 
         return link;
     }
@@ -573,66 +638,13 @@
     /*
      * Render options:
      *   logicalName, pluralName, primaryIdAttribute, primaryNameAttribute: metadata of the rendered table (null for nested objects)
-     *   isSingleRecord: render the edit and delete actions
-     *   isNested: render no actions at all
-     *   isCreateMode: render the 'create new row' action
      *   relationship: the relationship definition when browsing related rows
-     *   isSingleColumnValueOnly: the response only contains a single column value
      *   view: the main view to register editable fields in, null when not editable
+     * The actions on a row are rendered by the caller, as the first line inside its braces.
      */
-    const nestedRenderOptions = { isNested: true };
+    const nestedRenderOptions = {};
 
-    async function renderRecordRows(record, options) {
-        const rows = options.isNested ? [] : await renderRecordActionRows(record, options);
-
-        rows.push(...await renderPropertyRows(record, options));
-
-        return rows;
-    }
-
-    async function renderRecordActionRows(record, options) {
-        const { logicalName, pluralName, isSingleRecord, isCreateMode, relationship, isSingleColumnValueOnly, view } = options;
-        const recordId = record[options.primaryIdAttribute];
-        const hasRecordId = recordId != null && recordId !== '';
-        const rows = [];
-
-        if (logicalName && hasRecordId) {
-            if (isSingleRecord) {
-                const editPluralName = await retrievePluralName(logicalName);
-                const id = stripBraces(recordId);
-
-                rows.push(createRow(null, linkSpan(createFormLink(logicalName, recordId))));
-                rows.push(createRow('Edit this row', createEditMenu(view, { logicalName, pluralName: editPluralName, id, isCreateMode: false })));
-                rows.push(createDeleteRow(editPluralName, id));
-            } else {
-                rows.push(createRow(null, linkSpan(createWebApiLink(recordId, pluralName)), ' - ', linkSpan(createFormLink(logicalName, recordId))));
-            }
-
-            const disassociateLink = relationship ? createDisassociateLink(relationship, pluralName, recordId) : null;
-            if (disassociateLink) {
-                rows.push(createRow('Disassociate this row', linkSpan(disassociateLink)));
-            }
-        } else if (!isSingleColumnValueOnly && !isCreateMode && logicalName && !hasRecordId) {
-            rows.push(createRow(null, 'Could not generate links'));
-        }
-
-        if (isCreateMode) {
-            const createPluralName = await retrievePluralName(logicalName);
-            rows.push(createRow('Create new row', createEditMenu(view, { logicalName, pluralName: createPluralName, id: null, isCreateMode: true })));
-        }
-
-        return rows;
-    }
-
-    function createDeleteRow(pluralName, id) {
-        const deleteLink = actionLink('Delete this row', () => deleteRecord(pluralName, id, deleteLink));
-        const row = createRow('Delete this row', linkSpan(deleteLink));
-        row.classList.add('deleteRow');
-
-        return row;
-    }
-
-    // nested objects and arrays are listed first, followed by the columns
+    // the 'key: value' rows of a row: nested objects and arrays are listed first, followed by the columns
     async function renderPropertyRows(record, options) {
         const nestedRows = [];
         const columnRows = [];
@@ -660,7 +672,7 @@
 
     async function renderNestedValue(value) {
         if (!Array.isArray(value)) {
-            return ['{', createBlock(await renderRecordRows(value, nestedRenderOptions)), '}'];
+            return ['{', createBlock(await renderPropertyRows(value, nestedRenderOptions)), '}'];
         }
 
         const items = [];
@@ -698,7 +710,7 @@
         }
 
         if (options.logicalName !== 'solution' && key === 'solutionid' && value != null) {
-            return [createEditableField(cls, value, key, view), createWebApiLink(value, 'solutions')];
+            return [createEditableField(cls, value, key, view), createInlineActions([createWebApiLink(value, 'solutions')])];
         }
 
         if (key === options.primaryIdAttribute) {
@@ -723,15 +735,14 @@
         const pluralName = await retrievePluralName(lookupLogicalName);
         const id = stripBraces(guid);
 
+        const previewLink = actionLink('preview', () => previewRecord(pluralName, id));
+        previewLink.title = 'Show this row next to the current one';
+
         const lookupDisplay = el('span', { className: 'lookupDisplay' },
             '{',
             createBlock([
-                // the id is copied when clicked, like any other value, the links open the row
-                createRow(null,
-                    createField('guid', id, { extraClasses: ['lookupField'] }), ' - ',
-                    linkSpan(createWebApiLink(id, pluralName)), ' - ',
-                    linkSpan(createFormLink(lookupLogicalName, guid)), ' - ',
-                    linkSpan(actionLink('Preview', () => previewRecord(pluralName, id)))),
+                createActionRow([createWebApiLink(id, pluralName), createFormLink(lookupLogicalName, guid), previewLink]),
+                createRow(null, createField('guid', id)),
                 createRow(null, createField(determineType(formattedValue), formattedValue, { label: 'Name: ' })),
                 createRow(null, createField(determineType(lookupLogicalName), lookupLogicalName, { label: 'LogicalName: ' })),
                 createRow(null, createField(determineType(navigationProperty), navigationProperty, { label: 'NavigationProperty: ' })),
@@ -744,8 +755,9 @@
         return [lookupDisplay, lookupName, createLookupSlot(view, key, guid, lookupLogicalName)];
     }
 
-    // Collections: the remaining top level keys (e.g. @odata.nextLink) followed by the rows
+    // Collections: the remaining top level keys (e.g. @odata.nextLink) followed by the rows, each with its actions as its first line
     async function renderCollectionRows(json, options) {
+        const { logicalName, pluralName, primaryIdAttribute, relationship } = options;
         const rows = [];
 
         for (const key of Object.keys(json)) {
@@ -754,27 +766,23 @@
             }
 
             const value = json[key];
-
-            if (key === nextLinkKey && typeof value === 'string') {
-                rows.push(createRow(key, createNextPageLink(value)));
-            } else {
-                rows.push(createRow(key, isObject(value) ? await renderNestedValue(value) : formatDisplayText(value)));
-            }
+            rows.push(createRow(key, isObject(value) ? await renderNestedValue(value) : createField(determineType(value), value)));
         }
 
         const records = [];
         for (const record of json.value) {
-            records.push(createRow(null, '{', createBlock(await renderRecordRows(record, options)), '}'));
+            const actions = createRowActions(logicalName, pluralName, record[primaryIdAttribute], relationship);
+            records.push(createRow(null, '{', createBlock([createActionRow(actions), ...await renderPropertyRows(record, options)]), '}'));
         }
 
-        rows.push(createRow(`value (${describeRowCount(json)})`, '[', createBlock(records), ']'));
+        rows.push(createRow('value', '[', createBlock(records), ']'));
 
         return rows;
     }
 
     // the next page opens in the same tab, like paging usually does
     function createNextPageLink(nextLink) {
-        return [linkSpan(el('a', { href: nextLink + '#p' }, 'Next page')), '  ', createField('string', nextLink)];
+        return el('a', { href: nextLink + '#p', title: 'Open the next page of rows' }, 'next page');
     }
 
     // e.g. '50 rows', '50 of 1234 rows' or '50 of 5000+ rows'
@@ -868,7 +876,7 @@
         }
     }
 
-    // Renders a Web Api response into the container. Returns the rendered panel and its toolbar.
+    // Renders a Web Api response into the container: the header, followed by the response. Returns the rendered panel and its header.
     async function renderPanel(json, container, initialPluralName, { isPreview = false, isCreateMode = false } = {}) {
         if (!isPreview) {
             state.mode = isCreateMode ? 'create' : 'read';
@@ -898,36 +906,74 @@
             pluralName,
             primaryIdAttribute: entity.primaryIdAttribute,
             primaryNameAttribute: entity.primaryNameAttribute,
-            isSingleRecord: !isPreview,
-            isNested: false,
-            isCreateMode,
             relationship,
-            isSingleColumnValueOnly,
             view: null,
         };
 
+        const header = createHeader();
+        const canCreateOrBrowse = !isPreview && relationship == null && logicalName && !isCreateMode && pluralName !== 'workflows';
+
         let rows;
+        let rowActions = []; // the actions on the main row, its first line
         let singleRecordId = null;
 
         if (!logicalName) {
             // sdk messages other than retrieve or retrievemultiple
-            rows = await renderRecordRows(json, { ...recordOptions, relationship: null, isSingleColumnValueOnly: false });
+            header.readContext.append(initialPluralName);
+            rows = await renderPropertyRows(json, { ...recordOptions, relationship: null });
         } else if (isMultiple) {
-            setTitle(relationship != null ? 'related ' + pluralName : pluralName);
-            rows = await renderCollectionRows(json, { ...recordOptions, isSingleRecord: false, isSingleColumnValueOnly: false });
+            const title = relationship != null ? 'related ' + pluralName : pluralName;
+            setTitle(title);
+            header.readContext.append(title, ' ', createMuted(describeRowCount(json)));
+            rows = await renderCollectionRows(json, recordOptions);
         } else {
             setTitle(logicalName);
             singleRecordId = json[entity.primaryIdAttribute];
-            rows = await renderRecordRows(json, { ...recordOptions, view });
+            const hasRecordId = singleRecordId != null && singleRecordId !== '';
+
+            rows = await renderPropertyRows(json, { ...recordOptions, view });
+
+            if (isCreateMode) {
+                header.readContext.append('new ' + logicalName);
+            } else {
+                header.readContext.append(isPreview ? 'preview ' + logicalName : logicalName);
+
+                if (hasRecordId) {
+                    header.readContext.append(' ', createField('guid', stripBraces(singleRecordId), { extraClasses: ['inlineField'] }));
+                } else if (isSingleColumnValueOnly) {
+                    header.readContext.append(' ', createMuted(location.pathname.split('/').pop()));
+                }
+            }
+
+            if (isPreview) {
+                rowActions = createRowActions(logicalName, pluralName, singleRecordId, null);
+            } else if (isCreateMode || hasRecordId) {
+                const editPluralName = await retrievePluralName(logicalName);
+                const id = isCreateMode ? null : stripBraces(singleRecordId);
+                const menu = createEditMenu(view, { logicalName, pluralName: editPluralName, id, isCreateMode, header });
+
+                if (!isCreateMode) {
+                    rowActions = [
+                        createFormLink(logicalName, singleRecordId),
+                        menu.editLink,
+                        canCreateOrBrowse && !isSingleColumnValueOnly ? createRelationshipsLink(logicalName) : null,
+                        relationship ? createDisassociateLink(relationship, pluralName, singleRecordId) : null,
+                        createDeleteLink(editPluralName, id),
+                    ];
+                }
+            }
         }
 
-        const toolbar = el('div', { className: 'pfwa-toolbar' });
-        const panel = el('pre', { className: isPreview ? 'pfwa-root' : 'pfwa-root mainPanel panel' }, toolbar, '{', createBlock(rows), '}');
+        const panel = el('pre', { className: isPreview ? 'pfwa-root' : 'pfwa-root mainPanel panel' },
+            header.element,
+            '{',
+            createBlock([createActionRow(rowActions, 'readOnly'), ...rows]),
+            '}');
 
         container.replaceChildren(panel);
 
         if (isPreview) {
-            return { panel, toolbar };
+            return { panel, header };
         }
 
         document.body.classList.remove('bodyPreviewed');
@@ -935,51 +981,67 @@
         view.panel = panel;
         state.mainView = view;
 
-        const canCreateOrBrowse = relationship == null && logicalName && !isCreateMode && pluralName !== 'workflows';
+        const newRowLink = canCreateOrBrowse ? actionLink('new row', async () => {
+            setVisible(newRowLink, false);
+            await handleCreateNewRecord(logicalName);
+        }) : null;
 
-        if (!isCreateMode) {
-            toolbar.append(createToolbarButton('View as raw JSON', () => { window.location.href = window.location.href.split('#')[0]; }));
+        if (newRowLink) {
+            newRowLink.title = 'Create a new row in this table';
         }
 
-        if (canCreateOrBrowse) {
-            const createButton = createToolbarButton('Create new row', async () => {
-                setVisible(createButton, false);
-                await handleCreateNewRecord(logicalName);
-            });
-            toolbar.append(createButton);
-        }
-
-        if (canCreateOrBrowse && !isSingleColumnValueOnly && !isMultiple) {
-            const browseButton = createToolbarButton('View relationships', async () => {
-                setVisible(browseButton, false);
-                await handleBrowseRelationships(logicalName);
-            });
-            toolbar.append(browseButton);
-        }
+        setActions(header.readActions, [
+            isMultiple && typeof json[nextLinkKey] === 'string' ? createNextPageLink(json[nextLinkKey]) : null,
+            newRowLink,
+            isCreateMode ? null : el('a', { href: window.location.href.split('#')[0], title: 'Show the response of the Web Api as is' }, 'raw json'),
+        ]);
 
         const clientdata = state.originalRecord?.clientdata;
         if (!isMultiple && pluralName === 'workflows' && typeof clientdata === 'string' && clientdata.startsWith('{"')) {
-            createMonacoEditorControls(panel, toolbar, singleRecordId, clientdata);
+            createMonacoEditorControls(panel, header.element, singleRecordId, clientdata);
         }
 
-        return { panel, toolbar };
+        return { panel, header };
+    }
+
+    function createRelationshipsLink(logicalName) {
+        const link = actionLink('relationships', async () => {
+            setVisible(link, false);
+            await handleBrowseRelationships(logicalName);
+        });
+        link.title = 'Browse the relationships of this row';
+
+        return link;
+    }
+
+    function createDeleteLink(pluralName, id) {
+        const link = actionLink('delete', () => deleteRecord(pluralName, id, link), 'dangerLink');
+        link.title = 'Delete this row';
+
+        return link;
     }
 
     // ---------------------------------------------------------------------
     // Edit menu
     // ---------------------------------------------------------------------
 
-    function createEditMenu(view, { logicalName, pluralName, id, isCreateMode }) {
-        function createCheckbox(label, checked = false) {
+    /*
+     * The edit controls of the main row:
+     *   editLink: the 'edit' action, on the first line of the row
+     *   in the header while editing: what is edited, the number of changes, save and cancel,
+     *   and below that the options, the impersonation inputs and the changes to commit
+     */
+    function createEditMenu(view, { logicalName, pluralName, id, isCreateMode, header }) {
+        function createCheckbox(label, title, checked = false) {
             const input = el('input', { type: 'checkbox', checked });
-            return { input, row: el('div', { className: 'checkBoxDiv' }, label, input) };
+            return { input, label: el('label', { className: 'editOption', title }, input, label) };
         }
 
-        const bypassPlugins = createCheckbox('Bypass Custom Plugin execution');
-        const bypassFlows = createCheckbox('Bypass Power Automate Flow execution');
-        const previewChanges = createCheckbox('Preview changes before committing save', true);
-        const impersonate = createCheckbox('Impersonate another user');
-        const rememberSettings = createCheckbox('Remember these settings (for this environment)');
+        const previewChanges = createCheckbox('preview changes', 'Show the changes before committing the save', true);
+        const bypassPlugins = createCheckbox('bypass plugins', 'Bypass custom plugin execution');
+        const bypassFlows = createCheckbox('bypass flows', 'Bypass Power Automate flow execution');
+        const impersonate = createCheckbox('impersonate', isCreateMode ? 'Create as another user' : 'Update as another user');
+        const rememberSettings = createCheckbox('remember', 'Remember these settings for this environment');
 
         const impersonationField = el('select', { on: { change: () => setImpersonationField(impersonationField.value) } },
             el('option', { value: 'systemuserid' }, 'systemuserid'),
@@ -992,27 +1054,48 @@
             el('div', {}, 'Base impersonation on this field: ', impersonationField, '  ', el('i', {}, el('a', { href: impersonationDocsUrl, target: '_blank' }, "What's this?"))),
             el('div', {}, impersonationLabel, impersonationInput, '  ', impersonationPreview));
 
-        const editLink = actionLink('Edit this row', () => editRecord(logicalName, pluralName, id, isCreateMode), 'editLink');
-        const cancelLink = actionLink('Cancel', () => reloadPage(pluralName));
-        const submitLink = actionLink('Save', async () => {
-            setVisible(cancelLink, false);
-            setVisible(submitLink, false);
+        const editLink = actionLink('edit', () => editRecord(logicalName, pluralName, id, isCreateMode));
+        editLink.title = 'Edit the columns of this row';
+
+        const saveLink = actionLink('save', async () => {
+            setHeaderState('saving');
             await submitEdit(pluralName, id, isCreateMode);
         });
-        const previewContainer = el('div', { className: 'previewChangesDiv' });
-        const savingIndicator = el('div', { className: 'saveInProgressDiv pfwa-hidden' }, 'Saving...');
+        const cancelLink = actionLink('cancel', () => reloadPage(pluralName));
+        // below the changes, away from 'save' in the header, so a double click on 'save' does not commit
+        const commitLink = actionLink('commit save', async () => {
+            setHeaderState('saving');
+            const { changes, impersonateHeader } = menu.pendingSave;
+            await commitSave(pluralName, id, changes, impersonateHeader, isCreateMode, true);
+        });
+        commitLink.title = 'Save the changes listed above';
+        const backLink = actionLink('back', () => resetSubmitControls());
+        backLink.title = 'Go back to editing';
 
-        const element = el('div', { className: 'editMenuDiv pf-link pfwa-hidden' },
-            bypassPlugins.row,
-            bypassFlows.row,
-            previewChanges.row,
-            impersonate.row,
-            rememberSettings.row,
-            impersonateDiv,
-            previewContainer,
-            el('div', { className: 'editMenuAction' }, cancelLink),
-            el('div', { className: 'editMenuAction' }, submitLink),
-            savingIndicator);
+        const changeCount = createMuted('');
+
+        // editing: save or cancel, confirm: cancel (committing is below the changes), saving: no actions.
+        // The actions are right aligned, so in confirm nothing takes the place of 'save'
+        function setHeaderState(headerState) {
+            const actions = {
+                editing: [saveLink, cancelLink],
+                confirm: [cancelLink],
+                saving: [el('span', {}, 'saving…')],
+            };
+            setVisible(commitActions, headerState === 'confirm');
+            setActions(header.editActions, actions[headerState]);
+        }
+
+        header.editContext.append((isCreateMode ? 'new ' : 'editing ') + logicalName, ' ', changeCount);
+
+        const previewContainer = el('div', { className: 'previewChangesDiv' });
+        const commitActions = el('div', { className: 'commitActions pfwa-hidden' }, commitLink, ' · ', backLink);
+
+        const options = el('div', { className: 'editOptions' },
+            [previewChanges, bypassPlugins, bypassFlows, impersonate, rememberSettings].map(checkbox => checkbox.label));
+
+        header.editBody.append(options, impersonateDiv, previewContainer, commitActions);
+        setHeaderState('editing');
 
         function setImpersonationEnabled(enabled) {
             impersonate.input.checked = enabled;
@@ -1052,26 +1135,25 @@
 
         impersonate.input.addEventListener('change', () => setImpersonationEnabled(impersonate.input.checked));
 
-        if (view) {
-            view.editMenu = {
-                element,
-                editLink,
-                cancelLink,
-                submitLink,
-                previewContainer,
-                savingIndicator,
-                bypassPlugins: bypassPlugins.input,
-                bypassFlows: bypassFlows.input,
-                previewChanges: previewChanges.input,
-                impersonate: impersonate.input,
-                impersonationField,
-                impersonationInput,
-                rememberSettings: rememberSettings.input,
-                setImpersonatedUser,
-            };
-        }
+        const menu = {
+            editLink,
+            changeCount,
+            previewContainer,
+            setHeaderState,
+            pendingSave: null, // the changes which are previewed, saved when committing
+            bypassPlugins: bypassPlugins.input,
+            bypassFlows: bypassFlows.input,
+            previewChanges: previewChanges.input,
+            impersonate: impersonate.input,
+            impersonationField,
+            impersonationInput,
+            rememberSettings: rememberSettings.input,
+            setImpersonatedUser,
+        };
 
-        return [linkSpan(editLink), element];
+        view.editMenu = menu;
+
+        return menu;
     }
 
     function applySettings(menu) {
@@ -1386,13 +1468,18 @@
 
         const makeNullNotice = el('div', { className: 'makeLookupNullDiv pfwa-hidden' }, el('b', {}, 'Lookup will be cleared (will be set to null)'));
 
-        const undoItem = linkSpan(actionLink('Undo changes', () => undo()));
+        const editLink = actionLink('edit', () => beginEdit('update'));
+        editLink.title = 'Point this lookup to another row';
+        const clearLink = actionLink('clear', () => beginEdit('makenull'));
+        clearLink.title = 'Clear this lookup (set it to null)';
+        const undoLink = actionLink('undo', () => undo());
+        undoLink.title = 'Undo the changes to this lookup';
+
+        // e.g. 'edit · clear · undo', undo is only shown when the lookup was changed
+        const undoItem = el('span', {}, ' · ', undoLink);
         setVisible(undoItem, false);
 
-        const links = el('span', { className: 'lookupEditLinks' },
-            linkSpan(actionLink('Edit lookup', () => beginEdit('update'))),
-            linkSpan(actionLink('Clear lookup', () => beginEdit('makenull'))),
-            undoItem);
+        const links = el('span', { className: 'lookupEditLinks' }, editLink, ' · ', clearLink, undoItem);
 
         slot.element.append(links, makeNullNotice, editPanel);
 
@@ -1520,7 +1607,8 @@
         const view = state.mainView;
         state.mode = isCreateMode ? 'create' : 'update';
 
-        setVisible(view.editMenu.editLink, false);
+        // replaced while the edit mode loads, so it can't be clicked twice. The action row is hidden once editing
+        view.editMenu.editLink.replaceWith(createMuted('loading…'));
 
         const attributes = await retrieveEditableAttributes(logicalName, isCreateMode);
 
@@ -1551,9 +1639,42 @@
         }
 
         view.panel.classList.add('editing');
-        setVisible(view.editMenu.element, true);
 
         applySettings(view.editMenu);
+
+        // keep the number of changes in the header up to date
+        let countTimeout = null;
+        const scheduleCount = () => {
+            clearTimeout(countTimeout);
+            countTimeout = setTimeout(() => updateChangeCount(view, isCreateMode), 150);
+        };
+
+        for (const eventName of ['input', 'change', 'click']) {
+            view.panel.addEventListener(eventName, scheduleCount);
+        }
+
+        updateChangeCount(view, isCreateMode);
+    }
+
+    // e.g. '2 changes' or '1 change · invalid value'
+    async function updateChangeCount(view, isCreateMode) {
+        let count = 0;
+        let hasInvalidValue = false;
+
+        for (const editor of view.editors) {
+            try {
+                if (await readEditorChange(editor, isCreateMode)) {
+                    count++;
+                }
+            } catch (error) {
+                if (!(error instanceof UserError)) {
+                    throw error;
+                }
+                hasInvalidValue = true;
+            }
+        }
+
+        view.editMenu.changeCount.textContent = `${count} ${count === 1 ? 'change' : 'changes'}${hasInvalidValue ? ' · invalid value' : ''}`;
     }
 
     // disables all controls while previewing changes, so that no edits can be made after previewing
@@ -1573,9 +1694,8 @@
         const view = state.mainView;
         const menu = view.editMenu;
 
-        setVisible(menu.savingIndicator, false);
-        setVisible(menu.cancelLink, true);
-        setVisible(menu.submitLink, true);
+        menu.setHeaderState('editing');
+        menu.pendingSave = null;
         menu.previewContainer.replaceChildren();
 
         setControlsLocked(view, false);
@@ -1593,31 +1713,42 @@
         return true;
     }
 
+    // returns { column, payloadKey, oldValue, newValue } when the value of the editor changed, null otherwise
+    // throws a UserError when the value is invalid
+    async function readEditorChange(editor, isCreateMode) {
+        if (editor.dataType === 'lookup') {
+            const change = await editor.readChange();
+
+            if (change == null || !hasChanged(change.value, change.originalValue, 'lookup')) {
+                return null;
+            }
+
+            return {
+                column: editor.navigationProperty,
+                payloadKey: `${editor.navigationProperty}@odata.bind`,
+                oldValue: change.originalValue,
+                newValue: change.value
+            };
+        }
+
+        // if not found for some reason, normalize to null to prevent issues
+        const originalValue = isCreateMode ? null : (state.originalRecord[editor.fieldName] ?? null);
+        const value = editor.read();
+
+        return hasChanged(value, originalValue, editor.dataType)
+            ? { column: editor.fieldName, payloadKey: editor.fieldName, oldValue: originalValue, newValue: value }
+            : null;
+    }
+
     // returns a list of { column, payloadKey, oldValue, newValue }
     async function collectChanges(editors, isCreateMode) {
         const changes = [];
 
         for (const editor of editors) {
-            if (editor.dataType === 'lookup') {
-                const change = await editor.readChange();
+            const change = await readEditorChange(editor, isCreateMode);
 
-                if (change != null && hasChanged(change.value, change.originalValue, 'lookup')) {
-                    changes.push({
-                        column: editor.navigationProperty,
-                        payloadKey: `${editor.navigationProperty}@odata.bind`,
-                        oldValue: change.originalValue,
-                        newValue: change.value
-                    });
-                }
-                continue;
-            }
-
-            // if not found for some reason, normalize to null to prevent issues
-            const originalValue = isCreateMode ? null : (state.originalRecord[editor.fieldName] ?? null);
-            const value = editor.read();
-
-            if (hasChanged(value, originalValue, editor.dataType)) {
-                changes.push({ column: editor.fieldName, payloadKey: editor.fieldName, oldValue: originalValue, newValue: value });
+            if (change) {
+                changes.push(change);
             }
         }
 
@@ -1680,17 +1811,13 @@
 
         setControlsLocked(view, true);
 
-        const cancelLink = actionLink('Cancel', () => reloadPage(pluralName));
-        const commitLink = actionLink('Commit Save', async () => {
-            setVisible(commitLink, false);
-            setVisible(cancelLink, false);
-            await commitSave(pluralName, id, changes, impersonateHeader, isCreateMode, true);
-        });
+        // the changes are listed in the header, with 'commit save' below them
+        view.editMenu.pendingSave = { changes, impersonateHeader };
+        view.editMenu.setHeaderState('confirm');
 
-        view.editMenu.previewContainer.replaceChildren(
-            createChangesTable(changes, isCreateMode),
-            el('div', { className: 'editMenuAction' }, cancelLink),
-            el('div', { className: 'editMenuAction' }, commitLink));
+        view.editMenu.previewContainer.replaceChildren(changes.length > 0
+            ? createChangesTable(changes, isCreateMode)
+            : el('div', {}, createMuted('no changes')));
     }
 
     function createChangesTable(changes, isCreateMode) {
@@ -1734,7 +1861,7 @@
 
         saveSettings(menu, impersonateHeader, bypassCustomPluginExecution, bypassFlowExecution, wasPreviewEnabled);
 
-        setVisible(menu.savingIndicator, true);
+        menu.setHeaderState('saving');
 
         const response = await fetch(isCreateMode ? apiUrl + pluralName : apiUrl + pluralName + '(' + id + ')', {
             method: isCreateMode ? 'POST' : 'PATCH',
@@ -1870,15 +1997,18 @@
 
         const response = await odataFetch(apiUrl + pluralName + '(' + id + ')', false);
 
-        const { toolbar } = await renderPanel(response, previewPanel, pluralName, { isPreview: true });
+        const { header } = await renderPanel(response, previewPanel, pluralName, { isPreview: true });
 
-        toolbar.append(createToolbarButton('Close Preview', () => {
+        const closeLink = actionLink('close', () => {
             if (document.getElementsByClassName('previewPanel').length === 1) {
                 leavePreviewLayout(mainPanel);
             }
 
             previewPanel.remove();
-        }));
+        });
+        closeLink.title = 'Close this preview';
+
+        setActions(header.readActions, [closeLink]);
 
         // only scroll sideways to bring the preview into view (when there are multiple), never the main panel
         previewPanel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -2001,9 +2131,9 @@
         document.head.appendChild(el('script', { type: 'text/javascript', src: chrome.runtime.getURL(path), on: onLoad ? { load: onLoad } : {} }));
     }
 
-    function createMonacoEditorControls(mainPanel, toolbar, recordId, clientdata) {
+    function createMonacoEditorControls(mainPanel, header, recordId, clientdata) {
         if (checkIfJsonViewerEnabled()) {
-            toolbar.append(el('button', { type: 'button', disabled: true }, 'Currently, editing Flows is only possible in Chrome. Work in progress.'));
+            header.append(el('button', { type: 'button', disabled: true }, 'Currently, editing Flows is only possible in Chrome. Work in progress.'));
             return;
         }
 
@@ -2074,28 +2204,87 @@
                 padding-left: 3ch;
             }
 
-            /* a zero height strip which sticks to the top of the scroll container, so the buttons stay in view */
+            /* the header: a line which sticks to the top of the panel, what is shown on the left, the actions on the page on the right */
             .pfwa-toolbar {
                 position: sticky;
-                top: 10px;
-                height: 0;
+                top: 0;
                 z-index: 10;
                 display: flex;
-                flex-direction: row-reverse;
-                align-items: flex-start;
-                gap: 18px;
-                padding: 0 18px;
+                flex-wrap: wrap; /* in a narrow panel the actions move below what is shown, instead of out of view */
+                align-items: baseline;
+                gap: 2px 3ch;
+                margin: -10px -10px 6px;
+                padding: 8px 10px 6px;
+                background: white;
+                border-bottom: 1px solid rgba(128, 128, 128, 0.4);
+            }
+
+            .headerActions {
+                margin-left: auto;
+            }
+
+            /* while editing, below the line: the options, the impersonation inputs and the changes to commit */
+            .headerBody {
+                flex-basis: 100%;
+            }
+
+            .headerBody > * {
+                margin-top: 4px;
+            }
+
+            /* a long list of changes scrolls, so the header does not cover the whole panel */
+            .previewChangesDiv {
+                max-height: 40vh;
+                overflow: auto;
+            }
+
+            .previewChangesDiv:empty {
+                display: none;
             }
 
             .pfwa-toolbar button {
-                height: 30px;
-                min-width: 122px;
-                padding: 0 4px;
+                height: 22px;
+                padding: 0 6px;
                 cursor: pointer;
             }
 
             .pfwa-toolbar button:disabled {
                 cursor: default;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .pfwa-toolbar {
+                    background: #28282B;
+                }
+            }
+
+            /* the read parts are shown normally, the edit parts while editing */
+            .editing .readOnly, .pfwa-root:not(.editing) .editOnly {
+                display: none !important;
+            }
+
+            /* actions after a value on the same line */
+            .inlineActions, .lookupEditLinks {
+                margin-left: 2ch;
+            }
+
+            /* secondary text, e.g. the row count in the header */
+            .muted {
+                color: gray;
+            }
+
+            a.dangerLink {
+                color: firebrick;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .muted {
+                    color: #8c8c8c;
+                }
+
+                a.dangerLink {
+                    color: #ff7b72;
+                }
             }
 
             .multiSelectInput {
@@ -2266,7 +2455,7 @@
                 cursor: pointer;
             }
 
-            .panel .field:not(.lookupField), .panel .lookupDisplay {
+            .panel .field:not(.lookupField, .inlineField), .panel .lookupDisplay {
                 margin-right: 24px;
                 padding-right: 16px;
             }
@@ -2310,7 +2499,7 @@
                 display: unset;
             }
 
-            .editing .lookupDisplay, .editing .deleteRow, .locked .lookupEditLinks {
+            .editing .lookupDisplay, .locked .lookupEditLinks {
                 display: none;
             }
 
@@ -2331,26 +2520,26 @@
                 margin: 1px 0 -2px 0;
             }
 
-            .checkBoxDiv {
-                display: flex;
-                padding: 1px 0 1px 1ch;
-                align-items: center;
+            /* the edit options, the first line of the main row while editing, e.g. '[x] preview changes  [ ] bypass plugins' */
+            .editOption {
+                margin-right: 2ch;
+                cursor: pointer;
             }
 
-            .panel .checkBoxDiv input {
-                width: 25px;
+            .panel .editOption input {
+                cursor: pointer; /* checkboxes don't inherit the cursor of their label */
+                width: auto;
+                margin: 0 4px 0 0;
+                vertical-align: -2px;
             }
 
-            .impersonateDiv > div, .lookupEditRow, .makeLookupNullDiv {
+            /* while the changes are previewed, the options are disabled */
+            .locked .editOption, .panel .editOption input:disabled {
+                cursor: default;
+            }
+
+            .lookupEditRow, .makeLookupNullDiv {
                 padding-left: 3ch;
-            }
-
-            .editMenuAction, .saveInProgressDiv {
-                padding-left: 1ch;
-            }
-
-            .lookupEditLinks .pf-link {
-                margin-left: 3ch;
             }
 
             .lookupSelectTable {
@@ -2361,15 +2550,15 @@
                 margin-left: 10px;
             }
 
-            /* changes preview table */
+            /* changes preview table, in the header */
 
             .panel table {
                 color: black;
-                margin: 1.2em 0 1.2em 26px;
+                margin: 0;
                 border-collapse: collapse;
                 border: 1px solid black;
                 table-layout: fixed;
-                width: 98%;
+                width: 100%;
             }
 
             .panel thead td {
