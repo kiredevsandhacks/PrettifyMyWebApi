@@ -1915,12 +1915,9 @@
     }
 
     function renderRelationships(container, relationships, filter, logicalName) {
-        const all = {
-            manyToMany: relationships.ManyToManyRelationships,
-            oneToMany: relationships.OneToManyRelationships,
-            manyToOne: relationships.ManyToOneRelationships,
-        };
-        let { manyToMany, oneToMany, manyToOne } = all;
+        let manyToMany = relationships.ManyToManyRelationships;
+        let oneToMany = relationships.OneToManyRelationships;
+        let manyToOne = relationships.ManyToOneRelationships;
 
         if (filter) {
             const lowerCaseFilter = filter.toLowerCase();
@@ -1930,28 +1927,22 @@
             manyToOne = filterRelationships(manyToOne, relationshipFilterFields.oneToMany, lowerCaseFilter);
         }
 
-        // e.g. 'One to Many Relationships (37)' or, when filtered, 'One to Many Relationships (3 of 37)'
-        const heading = (title, shown, total, unit = '') =>
-            el('h2', {}, `${title} (${shown.length === total.length ? total.length : `${shown.length} of ${total.length}`}${unit})`);
-
         container.replaceChildren();
         appendChildren(container, [
-            heading('Many to Many Relationships', manyToMany, all.manyToMany),
+            el('h2', {}, 'Many to Many Relationships'),
             manyToMany.map(r => createManyToManyRelationshipLink(r, logicalName)),
-            heading('Many to One Relationships', manyToOne, all.manyToOne, ' lookups'),
+            el('h2', {}, 'Many to One Relationships (lookups)'),
             manyToOne.map(r => createManyToOneRelationshipLink(r, logicalName)),
-            heading('One to Many Relationships', oneToMany, all.oneToMany),
+            el('h2', {}, 'One to Many Relationships'),
             oneToMany.map(r => createOneToManyRelationshipLink(r, logicalName))
         ]);
     }
 
     function createManyToManyRelationshipLink(relationship, logicalName) {
-        const { Entity1LogicalName, Entity2LogicalName, IntersectEntityName } = relationship;
-
-        if (Entity1LogicalName === logicalName) {
-            return createRelationshipItem(relationship.Entity1NavigationPropertyName, `${Entity2LogicalName} (via ${IntersectEntityName})`).element;
-        } else if (Entity2LogicalName === logicalName) {
-            return createRelationshipItem(relationship.Entity2NavigationPropertyName, `${Entity1LogicalName} (via ${IntersectEntityName})`).element;
+        if (relationship.Entity1LogicalName === logicalName) {
+            return createRelationshipLink(relationship.Entity1NavigationPropertyName);
+        } else if (relationship.Entity2LogicalName === logicalName) {
+            return createRelationshipLink(relationship.Entity2NavigationPropertyName);
         }
 
         alert(`Could find the navigation property for many to many relationship ${relationship.SchemaName}`);
@@ -1965,32 +1956,28 @@
         }
 
         const navigationProperty = relationship.ReferencingEntityNavigationPropertyName;
-        const item = createRelationshipItem(navigationProperty, `${relationship.ReferencedEntity} (via ${relationship.ReferencingAttribute})`);
+        const link = createRelationshipLink(navigationProperty);
 
         // there is nothing to browse when the lookup is empty
         if (state.originalRecord['_' + navigationProperty + '_value'] == null && !state.foundNavigationProperties.includes(navigationProperty)) {
-            item.link.removeAttribute('href');
-            item.link.classList.add('disabledLink');
+            link.removeAttribute('href');
+            link.classList.add('disabledLink');
         }
 
-        return item.element;
+        return link;
     }
 
     function createOneToManyRelationshipLink(relationship, logicalName) {
         if (relationship.ReferencedEntity === logicalName) {
-            return createRelationshipItem(relationship.ReferencedEntityNavigationPropertyName, `${relationship.ReferencingEntity}.${relationship.ReferencingAttribute}`).element;
+            return createRelationshipLink(relationship.ReferencedEntityNavigationPropertyName);
         }
 
         alert(`Could find the navigation property for one to many relationship '${relationship.SchemaName}'`);
         return null;
     }
 
-    // the navigation property link, followed by the related table in muted text
-    function createRelationshipItem(navigationProperty, target) {
-        const link = el('a', { className: 'relationshipLink', target: '_blank', href: window.location.pathname + '/' + navigationProperty + '#pr' }, navigationProperty);
-        const element = el('div', { className: 'relationshipItem' }, link, el('span', { className: 'relationshipTarget' }, '  → ' + target));
-
-        return { link, element };
+    function createRelationshipLink(navigationProperty) {
+        return el('a', { className: 'relationshipLink', target: '_blank', href: window.location.pathname + '/' + navigationProperty + '#pr' }, navigationProperty);
     }
 
     // ---------------------------------------------------------------------
@@ -2172,12 +2159,9 @@
                 display: grid;
             }
 
-            .relationshipItem {
+            .relationshipLink {
                 margin: 4px 0px;
-            }
-
-            #relationshipBrowser .relationshipTarget {
-                color: gray;
+                width: fit-content;
             }
 
             .disabledLink {
@@ -2192,10 +2176,6 @@
 
                 .disabledLink {
                     color: #E9E9E9;
-                }
-
-                #relationshipBrowser .relationshipTarget {
-                    color: #8c8c8c;
                 }
             }
 
