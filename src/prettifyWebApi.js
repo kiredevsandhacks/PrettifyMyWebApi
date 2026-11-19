@@ -2964,8 +2964,9 @@
                 color: gray;
             }
 
-            /* the part of a field which is copied, it keeps the color of the field (also in dark mode) */
-            .field .copyValue {
+            /* the text of a field and the part which is copied keep the color of the field
+               (also in dark mode, where *:not(svg, path, a) would make them gray) */
+            .field .fieldText, .field .copyValue {
                 color: inherit;
             }
 
