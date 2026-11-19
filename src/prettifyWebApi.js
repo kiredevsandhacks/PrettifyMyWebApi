@@ -229,7 +229,11 @@
         }
 
         const request = (async () => {
-            const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
+            // always send the cookies, also when the environment hardened them with SameSite=None
+            const response = await fetch(url, {
+                credentials: 'include',
+                headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' }
+            });
             const responseJson = await response.json();
 
             // a failed response is not remembered, so the request is retried the next time
@@ -256,7 +260,7 @@
 
     // returns true when the request succeeded, alerts the error otherwise
     async function sendRequest(url, method, body) {
-        const options = { method };
+        const options = { method, credentials: 'include' };
 
         if (body !== undefined) {
             options.headers = { ...odataJsonHeaders, 'If-Match': '*' };
@@ -2330,6 +2334,7 @@
         try {
             response = await fetch(isCreateMode ? apiUrl + pluralName : apiUrl + pluralName + '(' + id + ')', {
                 method: isCreateMode ? 'POST' : 'PATCH',
+                credentials: 'include',
                 headers,
                 body: JSON.stringify(Object.fromEntries(changes.map(change => [change.payloadKey, change.newValue])))
             });
@@ -2388,7 +2393,7 @@
             return;
         }
 
-        const response = await fetch(apiUrl + pluralName + '(' + id + ')', { method: 'DELETE' });
+        const response = await fetch(apiUrl + pluralName + '(' + id + ')', { method: 'DELETE', credentials: 'include' });
 
         if (response.status === 204) {
             if (confirm('Row was deleted. Click OK to close this page.')) {

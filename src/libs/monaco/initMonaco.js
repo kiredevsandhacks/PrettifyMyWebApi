@@ -137,6 +137,7 @@
 
         const response = await fetch(requestUrl, {
             method: 'PATCH',
+            credentials: 'include', // also when the environment hardened its cookies with SameSite=None
             headers: {
                 'accept': 'application/json',
                 'content-type': 'application/json',
