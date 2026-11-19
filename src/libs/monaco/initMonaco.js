@@ -133,17 +133,8 @@
         saveFlowButton.disabled = true;
         saveFlowButton.textContent = 'Saving...';
 
-        // a link resolves the url the same way fetch does
-        const request = el('a', { href: mainPanel.dataset.apiUrl + 'workflows(' + mainPanel.dataset.recordId + ')' });
-        const requestUrl = request.href;
-
-        // the flow is saved to the Web Api of this page (same origin: protocol, host and port, for on-prem)
-        if (request.origin !== window.location.origin) {
-            alert('Could not determine the Web Api url of this environment, the flow was not saved.');
-            saveFlowButton.disabled = false;
-            saveFlowButton.textContent = originalButtonText;
-            return;
-        }
+        // apiUrl is the absolute url of the Web Api of this page, see prettifyWebApi.js
+        const requestUrl = mainPanel.dataset.apiUrl + 'workflows(' + mainPanel.dataset.recordId + ')';
 
         const response = await fetch(requestUrl, {
             method: 'PATCH',

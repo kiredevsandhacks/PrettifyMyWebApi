@@ -57,33 +57,35 @@
         oneToMany: ['ReferencedAttribute', 'ReferencedEntity', 'ReferencingAttribute', 'ReferencingEntity', 'ReferencedEntityNavigationPropertyName', 'ReferencingEntityNavigationPropertyName', 'SchemaName'],
     };
 
-    let apiUrl = '';
+    // The Web Api is on the origin of this page (protocol, host and port, for on-prem). Online and on-prem with IFD,
+    // the path starts with /api/data/. On-prem without IFD, it starts with the organization, e.g. /contoso/api/data/.
+    // The organization is the only segment that can come before /api/data/, and which characters it may contain is not
+    // documented, so anything but a slash is accepted.
+    const apiPathMatch = /^(\/[^\/]+)?\/api\/data\/v\d+\.\d+\//.exec(window.location.pathname);
 
-    try {
-        apiUrl = /([\/a-zA-Z0-9]+)?\/api\/data\/v[0-9][0-9]?.[0-9]\//.exec(window.location.pathname)[0];
-    } catch {
+    if (apiPathMatch == null) {
         alert('It seems you are not viewing a form or the dataverse odata web api. If you think this is an error, please contact the author of the extension and he will fix it asap.');
         return;
     }
 
-    // A link resolves a url the same way the browser does for links and requests on this page
-    function resolveUrl(url) {
-        const link = document.createElement('a');
-        link.href = url;
-        return link;
+    // All requests and links are built on these absolute urls, so they always stay on the origin of this page.
+    // e.g. https://contoso.crm4.dynamics.com/api/data/v9.2/ or, on-prem, https://my-env:1234/contoso/api/data/v9.1/
+    const apiUrl = window.location.origin + apiPathMatch[0];
+
+    // the forms and views of this environment, e.g. https://contoso.crm4.dynamics.com/ or https://my-env:1234/contoso/
+    const appUrl = window.location.origin + (apiPathMatch[1] ?? '') + '/';
+
+    // the path of this page after apiUrl, e.g. accounts(id)/contact_customer_accounts
+    const resourcePath = window.location.pathname.slice(apiPathMatch[0].length);
+
+    // true for an absolute url on the origin of this page
+    function isOnThisOrigin(url) {
+        try {
+            return new URL(url).origin === window.location.origin;
+        } catch {
+            return false;
+        }
     }
-
-    // Requests and links are built on apiUrl, and some links on the path of the page, so both have to stay on the
-    // origin of this page (protocol, host and port, for on-prem)
-    const resolvedApiUrl = resolveUrl(apiUrl);
-
-    if (resolvedApiUrl.origin !== window.location.origin || resolveUrl(window.location.pathname).origin !== window.location.origin) {
-        alert(`The url of this page does not point to the Web Api of this environment (${window.location.host}), PrettifyMyWebApi will not run on it.`);
-        return;
-    }
-
-    // from here on absolute, e.g. https://contoso.crm4.dynamics.com/api/data/v9.2/ or, on-prem, https://my-env:1234/Root/api/data/v9.2/
-    apiUrl = resolvedApiUrl.href;
 
     // ---------------------------------------------------------------------
     // State
@@ -553,7 +555,7 @@
     }
 
     function createFormLink(logicalName, guid) {
-        return el('a', { target: '_blank', title: 'Open this row in a form in a new tab', href: `/main.aspx?etn=${logicalName}&id=${guid}&pagetype=entityrecord` }, 'form');
+        return el('a', { target: '_blank', title: 'Open this row in a form in a new tab', href: `${appUrl}main.aspx?etn=${logicalName}&id=${guid}&pagetype=entityrecord` }, 'form');
     }
 
     // the actions on a row of a collection or a preview, e.g. 'new tab · form · disassociate'
@@ -939,6 +941,12 @@
 
     // the next page opens in the same tab, like paging usually does
     function createNextPageLink(nextLink) {
+        // the server returns an absolute url, it has to be the Web Api of this page like all other links
+        if (!isOnThisOrigin(nextLink)) {
+            console.warn('PrettifyMyWebApi: the next page is not on this origin: ' + nextLink);
+            return null;
+        }
+
         return el('a', { href: nextLink + '#p', title: 'Open the next page of rows' }, 'next page');
     }
 
@@ -2446,9 +2454,8 @@
 
     function disassociateRowManyToMany(pluralName, id) {
         return disassociate(() => {
-            // the part of this page's path after the Web Api url, e.g. accounts(id)/contactleads_association
-            const relationshipPath = location.pathname.slice(resolvedApiUrl.pathname.length);
-            return sendRequest(apiUrl + relationshipPath + '/$ref?$id=' + apiUrl + pluralName + '(' + id + ')', 'DELETE');
+            // resourcePath is the relationship of this page, e.g. accounts(id)/contactleads_association
+            return sendRequest(apiUrl + resourcePath + '/$ref?$id=' + apiUrl + pluralName + '(' + id + ')', 'DELETE');
         });
     }
 
@@ -2611,7 +2618,7 @@
     }
 
     function createRelationshipLink(navigationProperty) {
-        return el('a', { className: 'relationshipLink', target: '_blank', href: window.location.pathname + '/' + navigationProperty + '#pr' }, navigationProperty);
+        return el('a', { className: 'relationshipLink', target: '_blank', href: apiUrl + resourcePath + '/' + navigationProperty + '#pr' }, navigationProperty);
     }
 
     // ---------------------------------------------------------------------

@@ -7,6 +7,26 @@ function isSameOrigin(url, origin) {
   }
 }
 
+// the Web Api of a Dataverse environment, e.g. https://contoso.crm4.dynamics.com/api/data/v9.2/workflows
+function isDataverseOnlineUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === 'https:' && parsedUrl.hostname.endsWith('.dynamics.com') && parsedUrl.pathname.startsWith('/api/data/');
+  } catch {
+    return false;
+  }
+}
+
+// flows are opened from Power Automate, also through make.powerapps.com
+function isPowerPlatformOrigin(origin) {
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return protocol === 'https:' && (hostname.endsWith('.powerautomate.com') || hostname.endsWith('.powerapps.com'));
+  } catch {
+    return false;
+  }
+}
+
 async function handler(request, sender, sendResponse) {
   chrome.tabs.query({ active: true, currentWindow: true }, async function (tabs) {
     if (request.action === 'prettifyWebApi' && tabs[0].id === sender.tab.id) {
@@ -17,7 +37,7 @@ async function handler(request, sender, sendResponse) {
       });
     } else if (request.action === 'openInWebApi' && tabs[0].id === sender.tab.id && isSameOrigin(request.url, sender.origin)) {
       chrome.tabs.create({ url: request.url, active: true });
-    } else if (request.action === 'openFlowInWebApi' && tabs[0].id === sender.tab.id) {
+    } else if (request.action === 'openFlowInWebApi' && tabs[0].id === sender.tab.id && isPowerPlatformOrigin(sender.origin) && isDataverseOnlineUrl(request.url)) {
       chrome.tabs.create({ url: request.url, active: true });
     }
   });
