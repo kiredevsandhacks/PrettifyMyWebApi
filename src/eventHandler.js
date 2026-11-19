@@ -1,10 +1,6 @@
 (async function () {
     async function odataFetch(url) {
-        // always send the cookies, also when the environment hardened them with SameSite=None
-        const response = await fetch(url, {
-            credentials: 'include',
-            headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' }
-        });
+        const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
 
         return await response.json();
     }
