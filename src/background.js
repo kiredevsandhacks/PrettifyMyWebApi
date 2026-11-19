@@ -17,16 +17,6 @@ function isDataverseOnlineUrl(url) {
   }
 }
 
-// flows are opened from Power Automate, also through make.powerapps.com
-function isPowerPlatformOrigin(origin) {
-  try {
-    const { protocol, hostname } = new URL(origin);
-    return protocol === 'https:' && (hostname.endsWith('.powerautomate.com') || hostname.endsWith('.powerapps.com'));
-  } catch {
-    return false;
-  }
-}
-
 async function handler(request, sender, sendResponse) {
   chrome.tabs.query({ active: true, currentWindow: true }, async function (tabs) {
     if (request.action === 'prettifyWebApi' && tabs[0].id === sender.tab.id) {
@@ -37,7 +27,7 @@ async function handler(request, sender, sendResponse) {
       });
     } else if (request.action === 'openInWebApi' && tabs[0].id === sender.tab.id && isSameOrigin(request.url, sender.origin)) {
       chrome.tabs.create({ url: request.url, active: true });
-    } else if (request.action === 'openFlowInWebApi' && tabs[0].id === sender.tab.id && isPowerPlatformOrigin(sender.origin) && isDataverseOnlineUrl(request.url)) {
+    } else if (request.action === 'openFlowInWebApi' && tabs[0].id === sender.tab.id && isDataverseOnlineUrl(request.url)) {
       chrome.tabs.create({ url: request.url, active: true });
     }
   });
