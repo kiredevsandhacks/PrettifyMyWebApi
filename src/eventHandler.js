@@ -2,10 +2,9 @@
     const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const logicalNamePattern = /^[a-z0-9_]+$/i;
 
-    // true when the url stays on the protocol and host of this page (including the port, for on-prem)
-    function isOnThisHost(url) {
-        const resolved = new URL(url, window.location.href);
-        return resolved.protocol === window.location.protocol && resolved.host === window.location.host;
+    // true when the url stays on the origin of this page (protocol, host and port, for on-prem)
+    function isOnThisOrigin(url) {
+        return new URL(url, window.location.href).origin === window.location.origin;
     }
 
     async function odataFetch(url) {
@@ -57,7 +56,7 @@
         const pathSegments = window.location.pathname.split('/');
         const apiUrl = pathSegments.length <= 2 ? `/api/data/v${version}/` : `/${pathSegments[1]}/api/data/v${version}/`;
 
-        if (!isOnThisHost(apiUrl)) {
+        if (!isOnThisOrigin(apiUrl)) {
             throw 'Could not determine the Web Api url of this environment from ' + window.location.pathname;
         }
 

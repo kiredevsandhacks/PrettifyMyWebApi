@@ -134,10 +134,8 @@
         saveFlowButton.textContent = 'Saving...';
 
         const requestUrl = mainPanel.dataset.apiUrl + 'workflows(' + mainPanel.dataset.recordId + ')';
-        const resolvedUrl = new URL(requestUrl, window.location.href);
-
-        // the flow is saved to the Web Api of this page (same protocol and host, including the port for on-prem)
-        if (resolvedUrl.protocol !== window.location.protocol || resolvedUrl.host !== window.location.host) {
+        // the flow is saved to the Web Api of this page (same origin: protocol, host and port, for on-prem)
+        if (new URL(requestUrl, window.location.href).origin !== window.location.origin) {
             alert('Could not determine the Web Api url of this environment, the flow was not saved.');
             saveFlowButton.disabled = false;
             saveFlowButton.textContent = originalButtonText;

@@ -67,13 +67,10 @@
     }
 
     // Requests and links are built on apiUrl, and some links on the path of the page, so both have to stay on the
-    // protocol and host of this page (including the port, for on-prem)
-    const isOnThisHost = (url) => {
-        const resolved = new URL(url, window.location.href);
-        return resolved.protocol === window.location.protocol && resolved.host === window.location.host;
-    };
+    // origin of this page (protocol, host and port, for on-prem)
+    const isOnThisOrigin = (url) => new URL(url, window.location.href).origin === window.location.origin;
 
-    if (!isOnThisHost(apiUrl) || !isOnThisHost(window.location.pathname)) {
+    if (!isOnThisOrigin(apiUrl) || !isOnThisOrigin(window.location.pathname)) {
         alert(`The url of this page does not point to the Web Api of this environment (${window.location.host}), PrettifyMyWebApi will not run on it.`);
         return;
     }
