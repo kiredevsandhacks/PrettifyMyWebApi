@@ -2445,7 +2445,11 @@
     }
 
     function disassociateRowManyToMany(pluralName, id) {
-        return disassociate(() => sendRequest(window.location.pathname + '/$ref?$id=' + apiUrl + pluralName + '(' + id + ')', 'DELETE'));
+        return disassociate(() => {
+            // the part of this page's path after the Web Api url, e.g. accounts(id)/contactleads_association
+            const relationshipPath = location.pathname.slice(resolvedApiUrl.pathname.length);
+            return sendRequest(apiUrl + relationshipPath + '/$ref?$id=' + apiUrl + pluralName + '(' + id + ')', 'DELETE');
+        });
     }
 
     async function reloadPage(pluralName) {
