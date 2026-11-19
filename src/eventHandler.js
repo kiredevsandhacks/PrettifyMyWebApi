@@ -1,4 +1,13 @@
 (async function () {
+    const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const logicalNamePattern = /^[a-z0-9_]+$/i;
+
+    // true when the url stays on the protocol and host of this page (including the port, for on-prem)
+    function isOnThisHost(url) {
+        const resolved = new URL(url, window.location.href);
+        return resolved.protocol === window.location.protocol && resolved.host === window.location.host;
+    }
+
     async function odataFetch(url) {
         const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
 
@@ -6,6 +15,11 @@
     }
 
     async function getViewWebApiUrl(entityLogicalName, viewId, viewType) {
+        // the view id can be wrapped in braces
+        if (!guidPattern.test(viewId.replace(/^\{(.*)\}$/, '$1'))) {
+            throw 'unknown view id: ' + viewId;
+        }
+
         let queryParamName = '';
 
         if (viewType == 4230) {
@@ -32,10 +46,20 @@
     }
 
     async function getWebApiBaseUrl(entityLogicalName) {
+        if (!logicalNamePattern.test(entityLogicalName)) {
+            throw 'unknown table: ' + entityLogicalName;
+        }
+
         const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
         const version = versionArray[0] + '.' + versionArray[1];
 
-        const apiUrl = window.location.pathname.split('/').length <= 2 ? `/api/data/v${version}/` : `/${window.location.pathname.split('/')[1]}/api/data/v${version}/`
+        // on-prem, the path starts with the name of the organization, e.g. /contoso/main.aspx
+        const pathSegments = window.location.pathname.split('/');
+        const apiUrl = pathSegments.length <= 2 ? `/api/data/v${version}/` : `/${pathSegments[1]}/api/data/v${version}/`;
+
+        if (!isOnThisHost(apiUrl)) {
+            throw 'Could not determine the Web Api url of this environment from ' + window.location.pathname;
+        }
 
         const requestUrl = apiUrl + 'EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq %27' + entityLogicalName + '%27)';
 
@@ -128,7 +152,7 @@
         // it can be /cloudflows/ or /flows/ so just check for flows/
         const flowUniqueId = hrefToCheck.split('flows/').pop().split('?')[0].split('/')[0];
 
-        if (flowUniqueId && flowUniqueId.length === 36) {
+        if (flowUniqueId && guidPattern.test(flowUniqueId)) {
             const url = instanceUrl + 'api/data/v9.2/workflows?$filter=resourceid eq ' + flowUniqueId + ' or workflowidunique eq ' + flowUniqueId + ' or workflowid eq ' + flowUniqueId + '#pf'
             window.postMessage({ action: 'openFlowInWebApi', url: url });
         } else {
