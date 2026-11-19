@@ -2,9 +2,11 @@
     const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const logicalNamePattern = /^[a-z0-9_]+$/i;
 
-    // true when the url stays on the origin of this page (protocol, host and port, for on-prem)
-    function isOnThisOrigin(url) {
-        return new URL(url, window.location.href).origin === window.location.origin;
+    // A link resolves a url the same way the browser does for links and requests on this page
+    function resolveUrl(url) {
+        const link = document.createElement('a');
+        link.href = url;
+        return link;
     }
 
     async function odataFetch(url) {
@@ -54,18 +56,22 @@
 
         // on-prem, the path starts with the name of the organization, e.g. /contoso/main.aspx
         const pathSegments = window.location.pathname.split('/');
-        const apiUrl = pathSegments.length <= 2 ? `/api/data/v${version}/` : `/${pathSegments[1]}/api/data/v${version}/`;
+        const resolvedApiUrl = resolveUrl(pathSegments.length <= 2 ? `/api/data/v${version}/` : `/${pathSegments[1]}/api/data/v${version}/`);
 
-        if (!isOnThisOrigin(apiUrl)) {
+        // the Web Api is on the origin of this page (protocol, host and port, for on-prem)
+        if (resolvedApiUrl.origin !== window.location.origin) {
             throw 'Could not determine the Web Api url of this environment from ' + window.location.pathname;
         }
+
+        // absolute, e.g. https://contoso.crm4.dynamics.com/api/data/v9.2/ or, on-prem, https://my-env:1234/Root/api/data/v9.2/
+        const apiUrl = resolvedApiUrl.href;
 
         const requestUrl = apiUrl + 'EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq %27' + entityLogicalName + '%27)';
 
         const result = await odataFetch(requestUrl)
         const pluralName = result.value[0].EntitySetName;
 
-        const baseUrl = window.location.origin + apiUrl + pluralName;
+        const baseUrl = apiUrl + pluralName;
 
         return baseUrl;
     }

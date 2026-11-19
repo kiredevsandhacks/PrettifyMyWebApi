@@ -66,14 +66,24 @@
         return;
     }
 
+    // A link resolves a url the same way the browser does for links and requests on this page
+    function resolveUrl(url) {
+        const link = document.createElement('a');
+        link.href = url;
+        return link;
+    }
+
     // Requests and links are built on apiUrl, and some links on the path of the page, so both have to stay on the
     // origin of this page (protocol, host and port, for on-prem)
-    const isOnThisOrigin = (url) => new URL(url, window.location.href).origin === window.location.origin;
+    const resolvedApiUrl = resolveUrl(apiUrl);
 
-    if (!isOnThisOrigin(apiUrl) || !isOnThisOrigin(window.location.pathname)) {
+    if (resolvedApiUrl.origin !== window.location.origin || resolveUrl(window.location.pathname).origin !== window.location.origin) {
         alert(`The url of this page does not point to the Web Api of this environment (${window.location.host}), PrettifyMyWebApi will not run on it.`);
         return;
     }
+
+    // from here on absolute, e.g. https://contoso.crm4.dynamics.com/api/data/v9.2/ or, on-prem, https://my-env:1234/Root/api/data/v9.2/
+    apiUrl = resolvedApiUrl.href;
 
     // ---------------------------------------------------------------------
     // State
@@ -2435,7 +2445,7 @@
     }
 
     function disassociateRowManyToMany(pluralName, id) {
-        return disassociate(() => sendRequest(window.location.pathname + '/$ref?$id=' + location.origin + apiUrl + pluralName + '(' + id + ')', 'DELETE'));
+        return disassociate(() => sendRequest(window.location.pathname + '/$ref?$id=' + apiUrl + pluralName + '(' + id + ')', 'DELETE'));
     }
 
     async function reloadPage(pluralName) {
