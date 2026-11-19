@@ -29,28 +29,30 @@
         return `${baseUrl}?${queryParamName}=${viewId}`;;
     }
 
-    async function getSingleRowApiUrl() {
-        const entityLogicalName = Xrm.Page.data.entity.getEntityName();
+    // The table and id are read from the url of the form first, e.g. main.aspx?etn=account&id=...&pagetype=entityrecord.
+    // The form itself is the fallback, for when the url does not have them.
+    async function getSingleRowApiUrl(urlObj) {
+        const urlEntityLogicalName = urlObj.searchParams.get('etn');
+        const urlRecordId = urlObj.searchParams.get('id')?.replace(/^\{(.*)\}$/, '$1'); // the id can be wrapped in braces
+        const isInUrl = Boolean(urlEntityLogicalName) && guidPattern.test(urlRecordId ?? '');
+
+        const entity = window.Xrm.Page.data?.entity;
+
+        if (!isInUrl && !entity) {
+            throw 'Please open a form or view to use PrettifyMyWebApi';
+        }
+
+        const entityLogicalName = isInUrl ? urlEntityLogicalName : entity.getEntityName();
+        const recordId = isInUrl ? urlRecordId : entity.getId().replace('{', '').replace('}', '');
+
+        // e.g. a new row which is not saved yet
+        if (!guidPattern.test(recordId)) {
+            throw 'This row does not have an id yet, save it first';
+        }
 
         const baseUrl = await getWebApiBaseUrl(entityLogicalName);
 
-        const recordId = Xrm.Page.data.entity.getId().replace('{', '').replace('}', '');
-
         return `${baseUrl}(${recordId})`;
-    }
-
-    // The base url of the environment, e.g. https://contoso.crm4.dynamics.com or, on-prem, https://my-env:1234/contoso
-    function getClientUrl() {
-        // Forms and views are on main.aspx. Online and on-prem with IFD, it is at the root (the organization is in the host),
-        // on-prem without IFD it comes after the organization, e.g. /contoso/main.aspx
-        const pathMatch = /^(\/[^\/]+)?\/main\.aspx$/i.exec(window.location.pathname);
-
-        if (pathMatch != null) {
-            return window.location.origin + (pathMatch[1] ?? '');
-        }
-
-        // on any other page, the documented way, which works online and on-prem as well
-        return Xrm.Utility.getGlobalContext().getClientUrl();
     }
 
     async function getWebApiBaseUrl(entityLogicalName) {
@@ -61,7 +63,9 @@
         const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
         const version = versionArray[0] + '.' + versionArray[1];
 
-        const clientUrl = getClientUrl();
+        // The base url of the environment, documented to work online and on-prem, with the organization in the path
+        // or, with IFD, in the host: e.g. https://contoso.crm4.dynamics.com or https://my-env:1234/contoso
+        const clientUrl = Xrm.Utility.getGlobalContext().getClientUrl();
 
         let apiUrl;
         try {
@@ -127,8 +131,8 @@
             // check if on view
             if (viewId && entityLogicalName && viewType) {
                 urlToOpen = await getViewWebApiUrl(entityLogicalName, viewId, viewType);
-            } else if (window.Xrm.Page.data?.entity) {
-                urlToOpen = await getSingleRowApiUrl();
+            } else if ((entityLogicalName && urlObj.searchParams.get('id')) || window.Xrm.Page.data?.entity) {
+                urlToOpen = await getSingleRowApiUrl(urlObj);
             } else {
                 alert(`Please open a form or view to use PrettifyMyWebApi`);
                 return;
