@@ -221,22 +221,31 @@
     // Web Api
     // ---------------------------------------------------------------------
 
-    // GET request for json. With memoize, a successful response is remembered for as long as the page is open
-    async function odataFetch(url, memoize) {
+    // GET request for json. With memoize, a successful response is remembered for as long as the page is open.
+    // The request itself is remembered while it runs, so identical requests made at the same time are sent once.
+    function odataFetch(url, memoize) {
         if (memoize && memoizedCalls.hasOwnProperty(url)) {
             return memoizedCalls[url];
         }
 
-        const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
+        const request = (async () => {
+            const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
+            const responseJson = await response.json();
 
-        const responseJson = await response.json();
+            // a failed response is not remembered, so the request is retried the next time
+            if (memoize && !response.ok) {
+                delete memoizedCalls[url];
+            }
 
-        // a failed response is not remembered, so the request is retried the next time
-        if (memoize && response.ok) {
-            memoizedCalls[url] = responseJson;
+            return responseJson;
+        })();
+
+        if (memoize) {
+            memoizedCalls[url] = request;
+            request.catch(() => delete memoizedCalls[url]);
         }
 
-        return responseJson;
+        return request;
     }
 
     async function alertErrorResponse(response) {
@@ -359,7 +368,7 @@
             odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes?$select=LogicalName,AttributeType,AttributeOf,IsValidForAdvancedFind`, true)
         ]);
 
-        const attributes = json.value ?? [];
+        const attributes = readMetadataRows(json) ?? []; // throws when the request failed, so it is retried
         const primaryName = entity?.PrimaryNameAttribute;
 
         // AttributeOf is set for helper columns like 'owneridname', those cannot be filtered on
@@ -620,7 +629,43 @@
 
     // texts with more characters than this are cut off, see .longValue
     const longValueLength = 200;
+    const minCutOffLength = 20;
 
+    // A shorter text which is still wider than its panel is cut off as well, so the page does not scroll sideways.
+    // Runs after rendering, when the layout changes for a preview, and when the window is resized.
+    function cutOffOverflowingFields() {
+        const overflowing = [];
+
+        // undo the earlier cut offs (unless all is shown), the panel may be wider now
+        for (const field of document.querySelectorAll('.cutOffByWidth:not(.showingAll)')) {
+            field.classList.remove('longValue', 'cutOffByWidth');
+            field.querySelector(':scope > .showAllLink')?.remove();
+        }
+
+        // all positions are read first and the fields changed afterwards, so the layout is calculated once
+        for (const panel of document.querySelectorAll('.panel')) {
+            const panelRect = panel.getBoundingClientRect();
+            const contentRight = panelRect.left + panel.clientWidth + panel.scrollLeft - parseFloat(getComputedStyle(panel).paddingRight);
+
+            for (const field of panel.querySelectorAll('.pfwa-row > .field:not(.longValue, .inlineField), .pfwa-row > b > .field:not(.longValue, .inlineField)')) {
+                // a short text like 'null' after a long column name is not worth cutting off
+                if (field.textContent.length >= minCutOffLength && field.getBoundingClientRect().right > contentRight) {
+                    overflowing.push(field);
+                }
+            }
+        }
+
+        for (const field of overflowing) {
+            field.classList.add('longValue', 'cutOffByWidth');
+            field.append(createShowAllLink(field.textContent.length));
+        }
+    }
+
+    let cutOffTimeout = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(cutOffTimeout);
+        cutOffTimeout = setTimeout(cutOffOverflowingFields, 200);
+    });
     // Shows all of a text which was cut off, wrapped to the width of the page, or cuts it off again.
     // link.setShowAll(false) cuts it off from elsewhere, e.g. when editing starts.
     function createShowAllLink(length) {
@@ -990,7 +1035,10 @@
             return null;
         }
 
-        const { relationship, pluralName, entity } = await resolveRelationshipContext(initialPluralName, initialEntity, isSingleColumnValueOnly);
+        // a preview shows a single row of its own table, the relationship in the url belongs to the main page
+        const { relationship, pluralName, entity } = isPreview
+            ? { relationship: null, pluralName: initialPluralName, entity: initialEntity }
+            : await resolveRelationshipContext(initialPluralName, initialEntity, isSingleColumnValueOnly);
         const { logicalName } = entity;
         const view = isPreview ? null : { panel: null, slots: new Map(), editMenu: null, editors: [], lockedControls: [] };
 
@@ -1068,6 +1116,9 @@
 
         container.replaceChildren(panel);
 
+        // also the main panel, which became narrower when a preview opened
+        cutOffOverflowingFields();
+
         if (isPreview) {
             return { panel, header };
         }
@@ -1090,7 +1141,8 @@
         ]);
 
         const clientdata = state.originalRecord?.clientdata;
-        if (!isMultiple && pluralName === 'workflows' && typeof clientdata === 'string' && clientdata.startsWith('{"')) {
+        // not for a new row, where originalRecord is still the flow which was open
+        if (!isMultiple && !isCreateMode && pluralName === 'workflows' && typeof clientdata === 'string' && clientdata.startsWith('{"')) {
             createMonacoEditorControls(panel, header, singleRecordId, clientdata);
         }
 
@@ -1306,7 +1358,7 @@
 
     function createEditor(attribute, slot, optionSets) {
         const attributeType = attribute.AttributeType;
-        const isLookup = attributeType === 'Lookup' || attributeType === 'Owner';
+        const isLookup = attributeType === 'Lookup' || attributeType === 'Customer' || attributeType === 'Owner';
 
         // a lookup editor needs a lookup slot and vice versa
         if (isLookup !== (slot.kind === 'lookup')) {
@@ -1323,6 +1375,7 @@
             case 'Owner':
                 return createLookupEditor(slot, ['systemuser', 'team']);
             case 'Lookup':
+            case 'Customer': // account or contact
                 // not all lookups are targeted to a table apparently, skip if there are no targets
                 return attribute.Targets.length > 0 ? createLookupEditor(slot, attribute.Targets) : null;
             case 'Picklist': {
@@ -1402,6 +1455,11 @@
         }
     }
 
+    // the text of the option with this value, e.g. '1 : Bill To'
+    function describeSelectOption(select, value) {
+        return [...select.options].find(o => o.value === String(value))?.textContent ?? String(value);
+    }
+
     function createOptionSetEditor(slot, options, { nullable, editable, isStatus = false }) {
         const { fieldName } = slot;
         const value = initialValue(fieldName);
@@ -1447,6 +1505,7 @@
             fieldName,
             dataType: 'option',
             select,
+            describe: (optionValue) => describeSelectOption(select, optionValue),
             read: () => {
                 if (!select.value) {
                     // the select needs to contain a value always, if not, an error happened
@@ -1473,6 +1532,7 @@
         return {
             fieldName,
             dataType: 'bool',
+            describe: (boolValue) => describeSelectOption(select, boolValue),
             read: () => {
                 switch (select.value) {
                     case 'null': return null;
@@ -1527,6 +1587,11 @@
         return {
             fieldName,
             dataType: 'multiselectoption',
+            // e.g. '1 : Red, 3 : Blue'
+            describe: (values) => values.split(',').map(value => {
+                const option = options.find(o => String(o.Value) === value);
+                return value + ' : ' + (option ? option.Label?.UserLocalizedLabel?.Label : '(unmapped)');
+            }).join(', '),
             read: () => {
                 const values = checkboxes.filter(c => c.input.checked).map(c => c.option.Value);
                 // normalize to null if no options checked
@@ -1565,7 +1630,16 @@
         let requestNumber = 0; // responses of outdated requests are ignored
 
         function loadMetadata() {
-            metadataPromise ??= retrieveSearchMetadata(getLogicalName()).then(metadata => {
+            if (metadataPromise != null) {
+                return metadataPromise;
+            }
+
+            const promise = retrieveSearchMetadata(getLogicalName()).then(metadata => {
+                // the table changed while loading: the options of the new table are filled by its own request
+                if (promise !== metadataPromise) {
+                    return metadata;
+                }
+
                 const previous = searchBySelect.value;
                 searchBySelect.replaceChildren(...metadata.searchColumns.map(column =>
                     el('option', { value: column }, column === metadata.primaryName ? column + ' (primary column)' : column)));
@@ -1576,7 +1650,16 @@
                 }
                 return metadata;
             });
-            return metadataPromise;
+
+            // a failed request is retried the next time
+            promise.catch(() => {
+                if (promise === metadataPromise) {
+                    metadataPromise = null;
+                }
+            });
+
+            metadataPromise = promise;
+            return promise;
         }
 
         // accepts guids wrapped in braces, as copied from some places
@@ -1648,6 +1731,7 @@
 
             if (outcome.resolvedId) {
                 input.value = outcome.resolvedId; // without braces
+                notifyChanged();
             }
 
             preview.textContent = outcome.status;
@@ -1728,6 +1812,12 @@
             input.value = row.id;
             preview.textContent = row.name ?? '(no name)';
             showResults([], null);
+            notifyChanged();
+        }
+
+        // a value set from code fires no event, this lets e.g. the number of changes in the header update
+        function notifyChanged() {
+            input.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
         function onKeyDown(e) {
@@ -2111,7 +2201,7 @@
         const value = editor.read();
 
         return hasChanged(value, originalValue, editor.dataType)
-            ? { column: editor.fieldName, payloadKey: editor.fieldName, oldValue: originalValue, newValue: value }
+            ? { column: editor.fieldName, payloadKey: editor.fieldName, oldValue: originalValue, newValue: value, describe: editor.describe }
             : null;
     }
 
@@ -2199,14 +2289,15 @@
         const table = el('table', { id: 'previewTable' });
 
         const columns = isCreateMode ? ['column', 'new'] : ['column', 'old', 'new'];
-        const cellText = (value) => value == null ? '(empty)' : String(value);
+        // option values are shown with their label, e.g. '1 : Bill To'
+        const cellText = (change, value) => value == null ? '(empty)' : change.describe?.(value) ?? String(value);
 
         table.append(
             el('thead', {}, el('tr', {}, columns.map(column => el('td', {}, column)))),
             el('tbody', {}, changes.map(change => el('tr', {},
                 el('td', {}, change.column),
-                isCreateMode ? null : el('td', {}, cellText(change.oldValue)),
-                el('td', {}, cellText(change.newValue))))));
+                isCreateMode ? null : el('td', {}, cellText(change, change.oldValue)),
+                el('td', {}, cellText(change, change.newValue))))));
 
         return table;
     }
@@ -2280,7 +2371,7 @@
         const emptyRecord = {};
 
         for (const attribute of creatableAttributes) {
-            const isLookup = (attribute.AttributeType === 'Lookup' && attribute.Targets.length > 0) || attribute.AttributeType === 'Owner';
+            const isLookup = ((attribute.AttributeType === 'Lookup' || attribute.AttributeType === 'Customer') && attribute.Targets.length > 0) || attribute.AttributeType === 'Owner';
             emptyRecord[isLookup ? '_' + attribute.LogicalName + '_value' : attribute.LogicalName] = null;
         }
 
@@ -2371,6 +2462,9 @@
         document.body.classList.remove('bodyPreviewed');
 
         window.scrollTo(window.scrollX, mainPanel.getBoundingClientRect().top + window.scrollY + scrolledPastPanelTop);
+
+        // the main panel is wide again
+        cutOffOverflowingFields();
     }
 
     async function previewRecord(pluralName, id) {
@@ -3005,7 +3099,6 @@
                 white-space: nowrap;
                 text-overflow: ellipsis;
             }
-
             .showAllLink {
                 flex: none;
                 margin-left: 1ch;
@@ -3231,6 +3324,11 @@
                 height: 100vh;
                 box-sizing: border-box;
                 margin: 0px;
+            }
+
+            /* the panel scrolls by itself, and sticky is measured inside its padding: stick at the very top */
+            .prePreviewed .pfwa-toolbar {
+                top: -10px;
             }
 
             /* flow editor */
