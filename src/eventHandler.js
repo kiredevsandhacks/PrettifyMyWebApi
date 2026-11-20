@@ -1,4 +1,7 @@
 (async function () {
+    const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const logicalNamePattern = /^[a-z0-9_]+$/i;
+
     async function odataFetch(url) {
         const response = await fetch(url, { headers: { 'Prefer': 'odata.include-annotations="*"', 'Cache-Control': 'no-cache' } });
 
@@ -6,6 +9,11 @@
     }
 
     async function getViewWebApiUrl(entityLogicalName, viewId, viewType) {
+        // the view id can be wrapped in braces
+        if (!guidPattern.test(viewId.replace(/^\{(.*)\}$/, '$1'))) {
+            throw 'unknown view id: ' + viewId;
+        }
+
         let queryParamName = '';
 
         if (viewType == 4230) {
@@ -21,28 +29,63 @@
         return `${baseUrl}?${queryParamName}=${viewId}`;;
     }
 
-    async function getSingleRowApiUrl() {
-        const entityLogicalName = Xrm.Page.data.entity.getEntityName();
+    // The table and id are read from the url of the form first, e.g. main.aspx?etn=account&id=...&pagetype=entityrecord.
+    // The form itself is the fallback, for when the url does not have them.
+    async function getSingleRowApiUrl(urlObj) {
+        const urlEntityLogicalName = urlObj.searchParams.get('etn');
+        const urlRecordId = urlObj.searchParams.get('id')?.replace(/^\{(.*)\}$/, '$1'); // the id can be wrapped in braces
+        const isInUrl = Boolean(urlEntityLogicalName) && guidPattern.test(urlRecordId ?? '');
+
+        const entity = window.Xrm.Page.data?.entity;
+
+        if (!isInUrl && !entity) {
+            throw 'Please open a form or view to use PrettifyMyWebApi';
+        }
+
+        const entityLogicalName = isInUrl ? urlEntityLogicalName : entity.getEntityName();
+        const recordId = isInUrl ? urlRecordId : entity.getId().replace('{', '').replace('}', '');
+
+        // e.g. a new row which is not saved yet
+        if (!guidPattern.test(recordId)) {
+            throw 'This row does not have an id yet, save it first';
+        }
 
         const baseUrl = await getWebApiBaseUrl(entityLogicalName);
-
-        const recordId = Xrm.Page.data.entity.getId().replace('{', '').replace('}', '');
 
         return `${baseUrl}(${recordId})`;
     }
 
     async function getWebApiBaseUrl(entityLogicalName) {
+        if (!logicalNamePattern.test(entityLogicalName)) {
+            throw 'unknown table: ' + entityLogicalName;
+        }
+
         const versionArray = Xrm.Utility.getGlobalContext().getVersion().split('.');
         const version = versionArray[0] + '.' + versionArray[1];
 
-        const apiUrl = window.location.pathname.split('/').length <= 2 ? `/api/data/v${version}/` : `/${window.location.pathname.split('/')[1]}/api/data/v${version}/`
+        // The base url of the environment, documented to work online and on-prem, with the organization in the path
+        // or, with IFD, in the host: e.g. https://contoso.crm4.dynamics.com or https://my-env:1234/contoso
+        const clientUrl = Xrm.Utility.getGlobalContext().getClientUrl();
+
+        let apiUrl;
+        try {
+            // absolute, e.g. https://contoso.crm4.dynamics.com/api/data/v9.2/ or https://my-env:1234/contoso/api/data/v9.1/
+            apiUrl = new URL(clientUrl.replace(/\/+$/, '') + `/api/data/v${version}/`, window.location.href).href;
+        } catch {
+            throw 'Could not determine the Web Api url of this environment from ' + clientUrl;
+        }
+
+        // the Web Api is on the origin of this page (protocol, host and port, for on-prem)
+        if (new URL(apiUrl).origin !== window.location.origin) {
+            throw 'The Web Api url of this environment (' + apiUrl + ') is not on the origin of this page (' + window.location.origin + ')';
+        }
 
         const requestUrl = apiUrl + 'EntityDefinitions?$select=EntitySetName&$filter=(LogicalName eq %27' + entityLogicalName + '%27)';
 
         const result = await odataFetch(requestUrl)
         const pluralName = result.value[0].EntitySetName;
 
-        const baseUrl = window.location.origin + apiUrl + pluralName;
+        const baseUrl = apiUrl + pluralName;
 
         return baseUrl;
     }
@@ -88,8 +131,8 @@
             // check if on view
             if (viewId && entityLogicalName && viewType) {
                 urlToOpen = await getViewWebApiUrl(entityLogicalName, viewId, viewType);
-            } else if (window.Xrm.Page.data?.entity) {
-                urlToOpen = await getSingleRowApiUrl();
+            } else if ((entityLogicalName && urlObj.searchParams.get('id')) || window.Xrm.Page.data?.entity) {
+                urlToOpen = await getSingleRowApiUrl(urlObj);
             } else {
                 alert(`Please open a form or view to use PrettifyMyWebApi`);
                 return;
@@ -101,10 +144,10 @@
 
         urlToOpen += '#p'; // add the secret sauce
         window.postMessage({ action: 'openInWebApi', url: urlToOpen });
-    } else if (/\/api\/data\/v[0-9][0-9]?.[0-9]\//.test(window.location.pathname)) {
+    } else if (/\/api\/data\/v\d+\.\d+\//.test(window.location.pathname)) {
         // the host check is for supporting on-prem, where we always want to resort to the postmessage based flow
         // we only need total reload on the workflows table when viewing a single record, because of the monaco editor
-        if (window.location.hash === '#p' && /\/api\/data\/v[0-9][0-9]?.[0-9]\/workflows\(/.test(window.location.pathname) && window.location.host.endsWith(".dynamics.com")) {
+        if (window.location.hash === '#p' && /\/api\/data\/v\d+\.\d+\/workflows\(/.test(window.location.pathname) && window.location.host.endsWith(".dynamics.com")) {
             window.location.reload();
         } else {
             window.location.hash = 'p';
@@ -128,8 +171,17 @@
         // it can be /cloudflows/ or /flows/ so just check for flows/
         const flowUniqueId = hrefToCheck.split('flows/').pop().split('?')[0].split('/')[0];
 
-        if (flowUniqueId && flowUniqueId.length === 36) {
-            const url = instanceUrl + 'api/data/v9.2/workflows?$filter=resourceid eq ' + flowUniqueId + ' or workflowidunique eq ' + flowUniqueId + ' or workflowid eq ' + flowUniqueId + '#pf'
+        if (flowUniqueId && guidPattern.test(flowUniqueId)) {
+            let apiUrl;
+            try {
+                // absolute, whether or not the instanceUrl ends with a slash, e.g. https://contoso.crm4.dynamics.com/api/data/v9.2/
+                apiUrl = new URL('/api/data/v9.2/', instanceUrl).href;
+            } catch {
+                console.warn(`PrettifyMyWebApi: The Dataverse instanceUrl is not a url: ${instanceUrl}`);
+                return;
+            }
+
+            const url = apiUrl + 'workflows?$filter=resourceid eq ' + flowUniqueId + ' or workflowidunique eq ' + flowUniqueId + ' or workflowid eq ' + flowUniqueId + '#pf'
             window.postMessage({ action: 'openFlowInWebApi', url: url });
         } else {
             // for example, on make.powerapps it only works when viewing a flow from a solution
