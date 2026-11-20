@@ -15,12 +15,19 @@
     const etagKey = '@odata.etag';
     const totalRecordCountKey = '@Microsoft.Dynamics.CRM.totalrecordcount';
     const totalRecordCountLimitExceededKey = '@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded';
+    const odataCountKey = '@odata.count';
+    const nextLinkKey = '@odata.nextLink';
 
     const annotationTypes = [formattedValueType, navigationPropertyType, lookupType];
     const hiddenKeys = [contextKey, metaDataKey, etagKey];
     const hiddenCollectionKeys = [...hiddenKeys, totalRecordCountKey, totalRecordCountLimitExceededKey];
 
     const emptyGuid = '00000000-0000-0000-0000-000000000000';
+    const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // row search in the lookup and impersonation inputs
+    const maxSearchResults = 8; // keep it small to prevent overloading the database
+    const searchDelayMs = 300;
     const settingsStorageKey = 'pfwaSettings';
     const impersonationDocsUrl = 'https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/impersonate-another-user-web-api#how-to-impersonate-a-user';
 
@@ -31,9 +38,6 @@
         'OData-Version': '4.0',
     };
 
-    const svgNamespace = 'http://www.w3.org/2000/svg';
-    const clipboardIconPath = 'M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1s-1-.45-1-1s.45-1 1-1zm7 18H5V4h2v3h10V4h2v16z';
-    const clipboardCopiedIconPath = 'M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1s-1-.45-1-1s.45-1 1-1zm-2 14l-4-4l1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z';
 
     // maps Dataverse attribute types to the data type of a plain text input
     const textInputTypes = {
@@ -127,44 +131,83 @@
         element.classList.toggle('pfwa-hidden', !visible);
     }
 
-    // An anchor that runs a handler instead of navigating
+    // An action which runs onClick when clicked. While onClick runs, the action is busy: it stays in place,
+    // greyed out, and ignores clicks. Actions never hide themselves, so a double click can't land on
+    // another action that moved under the cursor. An action can also be disabled for longer, e.g. while saving.
     function actionLink(text, onClick, className) {
-        return el('a', {
+        const link = el('a', {
             className,
             href: '#',
             on: {
-                click: (e) => {
+                click: async (e) => {
                     e.preventDefault();
-                    onClick(e);
+
+                    if (link.classList.contains('busy') || link.classList.contains('disabled')) {
+                        return;
+                    }
+
+                    link.classList.add('busy');
+
+                    try {
+                        await onClick(e);
+                    } finally {
+                        link.classList.remove('busy');
+                    }
                 }
             }
         }, text);
+
+        return link;
     }
 
-    function linkSpan(...children) {
-        return el('span', { className: 'pf-link' }, children);
+    /*
+     * Layout rule: an action sits on the line of the thing it acts on.
+     * - actions on a row (or lookup) are the first line inside its braces: '{' / 'new tab · form' / 'key: value' / '}'
+     * - actions on the page are in the header, the sticky line at the top of a panel
+     * The data itself is only 'key: value'.
+     */
+
+    // secondary text, e.g. the row count in the header
+    function createMuted(text) {
+        return el('span', { className: 'muted' }, text);
     }
 
-    function createSvgIcon(className, pathData) {
-        const svg = document.createElementNS(svgNamespace, 'svg');
-        svg.setAttribute('class', className);
-        svg.setAttribute('viewBox', '0 0 24 24');
-
-        const path = document.createElementNS(svgNamespace, 'path');
-        path.setAttribute('fill', 'currentColor');
-        path.setAttribute('d', pathData);
-
-        svg.appendChild(path);
-        return svg;
+    // the actions on a row, as the first line inside its braces, e.g. 'new tab · form · preview'
+    function createActionRow(actions, extraClass) {
+        const visibleActions = actions.filter(Boolean);
+        return visibleActions.length === 0 ? null : el('div', { className: ['pfwa-row', 'actionRow', 'actions', extraClass].filter(Boolean).join(' ') }, visibleActions);
     }
 
-    function createToolbarButton(label, onClick) {
-        return el('button', { type: 'button', on: { click: onClick } }, label);
+    // actions after a value on the same line, e.g. a solutionid's 'new tab'
+    function createInlineActions(actions) {
+        return el('span', { className: 'inlineActions actions' }, actions);
+    }
+
+    // The sticky line at the top of a panel: what is shown on the left, the actions on the page on the right.
+    // The read parts are shown normally, the edit parts while editing (see .readOnly and .editOnly).
+    // While editing, the edit options and the changes to commit are shown below the line.
+    function createHeader() {
+        const header = {
+            readContext: el('span', { className: 'headerContext readOnly' }),
+            editContext: el('span', { className: 'headerContext editOnly' }),
+            readActions: el('span', { className: 'headerActions actions readOnly' }),
+            editActions: el('span', { className: 'headerActions actions editOnly' }),
+            editBody: el('div', { className: 'headerBody editOnly' }), // below the line: the edit options and the changes to commit
+        };
+
+        header.element = el('div', { className: 'pfwa-toolbar' }, header.readContext, header.editContext, header.readActions, header.editActions, header.editBody);
+
+        return header;
+    }
+
+    function setActions(container, actions) {
+        container.replaceChildren(...actions.filter(Boolean));
     }
 
     // a row of the json-like output, e.g. 'key: value'. Pass null as key for array items.
+    // The key can be a string or a node, e.g. a copyable key.
     function createRow(key, ...content) {
-        const keyNodes = key == null ? null : [el('span', { className: 'keySpan' }, key), ': '];
+        const keyNodes = key == null ? null : [typeof key === 'string' ? el('span', { className: 'keySpan' }, key) : key, ': '];
         return el('div', { className: 'pfwa-row' }, keyNodes, content);
     }
 
@@ -173,16 +216,12 @@
         return el('div', { className: 'pfwa-block' }, rows);
     }
 
-    // created once and cloned for every field
-    const copyButtonTemplate = el('span', { className: 'copyButton' }, createSvgIcon('copyIcon', clipboardIconPath));
-    const copiedNotificationTemplate = el('span', { className: 'copiedNotification' },
-        createSvgIcon('copiedIcon', clipboardCopiedIconPath),
-        el('span', { className: 'copiedText' }, 'Copied!'));
 
     // ---------------------------------------------------------------------
     // Web Api
     // ---------------------------------------------------------------------
 
+    // GET request for json. With memoize, a successful response is remembered for as long as the page is open
     async function odataFetch(url, memoize) {
         if (memoize && memoizedCalls.hasOwnProperty(url)) {
             return memoizedCalls[url];
@@ -192,7 +231,8 @@
 
         const responseJson = await response.json();
 
-        if (memoize) {
+        // a failed response is not remembered, so the request is retried the next time
+        if (memoize && response.ok) {
             memoizedCalls[url] = responseJson;
         }
 
@@ -288,18 +328,52 @@
         };
     }
 
+    // the rows of a metadata response. Throws the error of Dataverse when the request failed, e.g. a missing privilege
+    function readMetadataRows(json) {
+        if (json.error) {
+            throw new Error(json.error.message);
+        }
+
+        return json.value;
+    }
+
     // validityProperty: IsValidForUpdate, IsValidForCreate
     async function retrieveAttributes(logicalName, validityProperty) {
         const json = await odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes?$filter=${validityProperty} eq true`, true);
 
-        return json.value;
+        return readMetadataRows(json);
     }
 
     // metadataType: PicklistAttributeMetadata, MultiSelectPicklistAttributeMetadata, StateAttributeMetadata, etc.
     async function retrieveOptionSetAttributes(logicalName, metadataType) {
         const json = await odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes/Microsoft.Dynamics.CRM.${metadataType}?$select=LogicalName&$expand=OptionSet,GlobalOptionSet`, true);
 
-        return json.value;
+        return readMetadataRows(json);
+    }
+
+    // the columns a row search can filter on with contains() (primary name column first),
+    // and whether the results can be ordered by modifiedon
+    async function retrieveSearchMetadata(logicalName) {
+        const [entity, json] = await Promise.all([
+            findEntityByLogicalName(logicalName),
+            odataFetch(`${apiUrl}EntityDefinitions(LogicalName='${logicalName}')/Attributes?$select=LogicalName,AttributeType,AttributeOf,IsValidForAdvancedFind`, true)
+        ]);
+
+        const attributes = json.value ?? [];
+        const primaryName = entity?.PrimaryNameAttribute;
+
+        // AttributeOf is set for helper columns like 'owneridname', those cannot be filtered on
+        const otherColumns = attributes
+            .filter(a => (a.AttributeType === 'String' || a.AttributeType === 'Memo') && a.AttributeOf == null && a.IsValidForAdvancedFind?.Value && a.LogicalName !== primaryName)
+            .map(a => a.LogicalName)
+            .sort();
+
+        return {
+            entity,
+            primaryName,
+            searchColumns: primaryName ? [primaryName, ...otherColumns] : otherColumns,
+            hasModifiedOn: attributes.some(a => a.LogicalName === 'modifiedon')
+        };
     }
 
     async function retrieveEditableAttributes(logicalName, isCreateMode) {
@@ -443,16 +517,32 @@
     // Links
     // ---------------------------------------------------------------------
 
-    function createApiLink(pluralName, guid, text) {
-        return el('a', { target: '_blank', href: `${apiUrl}${pluralName}(${stripBraces(guid)})#p` }, text);
-    }
+    // Action labels are short and lowercase, the tooltip explains what they do
 
+    // opens the row in the Web Api in a new tab
     function createWebApiLink(guid, pluralName) {
-        return createApiLink(pluralName, guid, 'Open in Web Api');
+        return el('a', { target: '_blank', title: 'Open this row in the Web Api in a new tab', href: `${apiUrl}${pluralName}(${stripBraces(guid)})#p` }, 'new tab');
     }
 
     function createFormLink(logicalName, guid) {
-        return el('a', { target: '_blank', href: `/main.aspx?etn=${logicalName}&id=${guid}&pagetype=entityrecord` }, 'Open in Form');
+        return el('a', { target: '_blank', title: 'Open this row in a form in a new tab', href: `/main.aspx?etn=${logicalName}&id=${guid}&pagetype=entityrecord` }, 'form');
+    }
+
+    // the actions on a row of a collection or a preview, e.g. 'new tab · form · disassociate'
+    function createRowActions(logicalName, pluralName, recordId, relationship) {
+        if (!logicalName) {
+            return [];
+        }
+
+        if (recordId == null || recordId === '') {
+            return [createMuted('could not generate links')];
+        }
+
+        return [
+            createWebApiLink(recordId, pluralName),
+            createFormLink(logicalName, recordId),
+            relationship ? createDisassociateLink(relationship, pluralName, recordId) : null
+        ];
     }
 
     function createDisassociateLink(relationship, pluralName, recordId) {
@@ -469,11 +559,8 @@
             return null;
         }
 
-        const link = actionLink('Disassociate this row', async () => {
-            setVisible(link, false);
-            await disassociate();
-            setVisible(link, true);
-        });
+        const link = actionLink('disassociate', () => disassociate(), 'dangerLink');
+        link.title = 'Remove the relationship between this row and the parent row';
 
         return link;
     }
@@ -482,26 +569,119 @@
     // Fields
     // ---------------------------------------------------------------------
 
-    // a value which can be copied to the clipboard by clicking it
-    function createField(cls, value, ...extraClasses) {
-        const text = formatDisplayText(value);
-        const field = el('span', { className: [cls, 'field', ...extraClasses].join(' ') },
-            text,
-            copyButtonTemplate.cloneNode(true),
-            copiedNotificationTemplate.cloneNode(true));
+    // A tooltip for everything that can be copied (an element with a copyText), showing exactly what will be copied.
+    // One listener for the whole page sets it when hovering, because there is nothing to copy while editing.
+    function showCopyTooltip(event) {
+        const element = event.target.closest('.field, .copyableKey');
 
+        if (element?.copyText == null) {
+            return;
+        }
+
+        const maxLength = 100;
+        const text = element.copyText;
+
+        element.title = element.closest('.editing') ? '' : 'Click to copy: ' + (text.length > maxLength ? text.slice(0, maxLength) + '…' : text);
+    }
+
+    /*
+     * A value which can be copied to the clipboard by clicking it. Only the raw value is copied, not the display text.
+     * The whole field is clickable, but only the part which is copied is underlined on hover.
+     * Options:
+     *   label: display only text in front of the value, e.g. 'Name: '
+     *   formattedValue: display only text after the value, shown dimmed
+     *   extraClasses: additional css classes
+     * A very long text (the value with its formatted value), e.g. the description of an email, is cut off at the edge
+     * of the page with '…', followed by 'show all' (not in the header, which cuts off by itself).
+     * Clicking the field still copies the full value.
+     */
+    function createField(cls, value, { label, formattedValue, extraClasses = [] } = {}) {
+        const text = String(value);
+        const displayText = formatDisplayText(value);
+        const formattedText = formattedValue == null ? null : ' : ' + formatDisplayText(formattedValue);
+        const length = displayText.length + (formattedText?.length ?? 0);
+        const isLong = length > longValueLength && !extraClasses.includes('inlineField');
+
+        // the text parts together, so that a long text is cut off once, at its end
+        const fieldText = el('span', { className: 'fieldText' },
+            label,
+            el('span', { className: 'copyValue' }, displayText),
+            formattedText == null ? null : el('span', { className: 'formattedValue' }, formattedText));
+
+        const field = el('span', { className: [cls, 'field', ...extraClasses, isLong ? 'longValue' : null].filter(Boolean).join(' ') },
+            fieldText,
+            isLong ? createShowAllLink(length) : null);
+
+        field.copyText = text;
         field.addEventListener('click', () => copyFieldToClipboard(field, text));
 
         return field;
     }
 
-    // a field which gets an input appended when the row is edited
-    function createEditableField(cls, value, fieldName, view) {
-        const field = createField(cls, value);
+    // texts with more characters than this are cut off, see .longValue
+    const longValueLength = 200;
 
-        view?.slots.set(fieldName, { kind: 'field', fieldName, element: field });
+    // Shows all of a text which was cut off, wrapped to the width of the page, or cuts it off again.
+    // link.setShowAll(false) cuts it off from elsewhere, e.g. when editing starts.
+    function createShowAllLink(length) {
+        const link = el('a', {
+            className: 'showAllLink',
+            href: '#',
+            on: {
+                click: (e) => {
+                    e.preventDefault();
+                    e.stopPropagation(); // not a click on the field, which copies it
 
-        return field;
+                    setShowAll(!link.parentElement.classList.contains('showingAll'));
+                }
+            }
+        });
+
+        function setShowAll(showAll) {
+            link.parentElement?.classList.toggle('showingAll', showAll);
+            link.textContent = showAll ? 'show less' : 'show all';
+            link.title = showAll ? 'Cut it off again' : `Show all ${length} characters`;
+        }
+
+        setShowAll(false);
+        link.setShowAll = setShowAll;
+
+        return link;
+    }
+
+    // a column name which copies itself to the clipboard when clicked
+    function createCopyableKey(key) {
+        const keySpan = el('span', { className: 'keySpan copyableKey' }, key);
+        keySpan.copyText = key;
+
+        keySpan.addEventListener('click', async () => {
+            // no copying while editing, same as fields
+            if (keySpan.closest('.editing')) {
+                return;
+            }
+
+            try {
+                await navigator.clipboard.writeText(key);
+                keySpan.classList.add('copied');
+                setTimeout(() => keySpan.classList.remove('copied'), 400);
+            } catch {
+                alert('Failed to copy');
+            }
+        });
+
+        return keySpan;
+    }
+
+    // A field, followed by the container which receives its editor when the row is edited (only in the main view).
+    // The editor is next to the field instead of inside it, so it is laid out the same for short and long values.
+    // Returns [field, editor container].
+    function createEditableField(cls, value, fieldName, view, fieldOptions) {
+        const field = createField(cls, value, fieldOptions);
+        const editorContainer = view ? el('span', { className: 'fieldEditor' }) : null;
+
+        view?.slots.set(fieldName, { kind: 'field', fieldName, element: editorContainer });
+
+        return [field, editorContainer];
     }
 
     // the container which receives the lookup edit controls when the row is edited
@@ -550,68 +730,13 @@
     /*
      * Render options:
      *   logicalName, pluralName, primaryIdAttribute, primaryNameAttribute: metadata of the rendered table (null for nested objects)
-     *   isSingleRecord: render the edit and delete actions
-     *   isNested: render no actions at all
-     *   isCreateMode: render the 'create new row' action
      *   relationship: the relationship definition when browsing related rows
-     *   isSingleColumnValueOnly: the response only contains a single column value
      *   view: the main view to register editable fields in, null when not editable
+     * The actions on a row are rendered by the caller, as the first line inside its braces.
      */
-    const nestedRenderOptions = { isNested: true };
+    const nestedRenderOptions = {};
 
-    async function renderRecordRows(record, options) {
-        const rows = options.isNested ? [] : await renderRecordActionRows(record, options);
-
-        rows.push(...await renderPropertyRows(record, options));
-
-        return rows;
-    }
-
-    async function renderRecordActionRows(record, options) {
-        const { logicalName, pluralName, isSingleRecord, isCreateMode, relationship, isSingleColumnValueOnly, view } = options;
-        const recordId = record[options.primaryIdAttribute];
-        const hasRecordId = recordId != null && recordId !== '';
-        const rows = [];
-
-        if (logicalName && hasRecordId) {
-            rows.push(createRow('Form Link', linkSpan(createFormLink(logicalName, recordId))));
-
-            if (isSingleRecord) {
-                const editPluralName = await retrievePluralName(logicalName);
-                const id = stripBraces(recordId);
-
-                rows.push(createRow('Edit this row', createEditMenu(view, { logicalName, pluralName: editPluralName, id, isCreateMode: false })));
-                rows.push(createDeleteRow(editPluralName, id));
-            } else {
-                rows.push(createRow('Web Api Link', linkSpan(createWebApiLink(recordId, pluralName))));
-            }
-
-            const disassociateLink = relationship ? createDisassociateLink(relationship, pluralName, recordId) : null;
-            if (disassociateLink) {
-                rows.push(createRow('Disassociate this row', linkSpan(disassociateLink)));
-            }
-        } else if (!isSingleColumnValueOnly && !isCreateMode && logicalName && !hasRecordId) {
-            rows.push(createRow('Form Link', 'Could not generate link'));
-            rows.push(createRow('Web Api Link', 'Could not generate link'));
-        }
-
-        if (isCreateMode) {
-            const createPluralName = await retrievePluralName(logicalName);
-            rows.push(createRow('Create new row', createEditMenu(view, { logicalName, pluralName: createPluralName, id: null, isCreateMode: true })));
-        }
-
-        return rows;
-    }
-
-    function createDeleteRow(pluralName, id) {
-        const deleteLink = actionLink('Delete this row', () => deleteRecord(pluralName, id, deleteLink));
-        const row = createRow('Delete this row', linkSpan(deleteLink));
-        row.classList.add('deleteRow');
-
-        return row;
-    }
-
-    // nested objects and arrays are listed first, followed by the columns
+    // the 'key: value' rows of a row: nested objects and arrays are listed first, followed by the columns
     async function renderPropertyRows(record, options) {
         const nestedRows = [];
         const columnRows = [];
@@ -630,7 +755,7 @@
                 // an annotation without a matching column
                 nestedRows.push(createRow(key, formatDisplayText(value)));
             } else {
-                columnRows.push(createRow(key, await renderPropertyValue(record, key, options, consumedKeys)));
+                columnRows.push(createRow(createCopyableKey(key), await renderPropertyValue(record, key, options, consumedKeys)));
             }
         }
 
@@ -639,7 +764,7 @@
 
     async function renderNestedValue(value) {
         if (!Array.isArray(value)) {
-            return ['{', createBlock(await renderRecordRows(value, nestedRenderOptions)), '}'];
+            return ['{', createBlock(await renderPropertyRows(value, nestedRenderOptions)), '}'];
         }
 
         const items = [];
@@ -663,7 +788,7 @@
 
         if (key.startsWith('_') && key.endsWith('_value')) {
             // a lookup without a value
-            return [createField(cls, value, 'lookupField'), createLookupSlot(view, key, null, null)];
+            return [createField(cls, value, { extraClasses: ['lookupField'] }), createLookupSlot(view, key, null, null)];
         }
 
         const formattedValue = record[key + formattedValueType];
@@ -671,13 +796,13 @@
             consumedKeys.add(key + formattedValueType);
 
             // toString the value because it can be a number. The formattedValue is always a string
-            const text = value?.toString() !== formattedValue ? value + ' : ' + formattedValue : value;
+            const isDifferent = value?.toString() !== formattedValue;
 
-            return createEditableField(cls, text, key, view);
+            return createEditableField(cls, value, key, view, isDifferent ? { formattedValue } : undefined);
         }
 
         if (options.logicalName !== 'solution' && key === 'solutionid' && value != null) {
-            return [createEditableField(cls, value, key, view), createWebApiLink(value, 'solutions')];
+            return [createEditableField(cls, value, key, view), createInlineActions([createWebApiLink(value, 'solutions')])];
         }
 
         if (key === options.primaryIdAttribute) {
@@ -685,7 +810,8 @@
         }
 
         if (key === options.primaryNameAttribute) {
-            return el('b', {}, createEditableField(cls, value, key, view));
+            const [field, editorContainer] = createEditableField(cls, value, key, view);
+            return [el('b', {}, field), editorContainer];
         }
 
         return createEditableField(cls, value, key, view);
@@ -702,27 +828,29 @@
         const pluralName = await retrievePluralName(lookupLogicalName);
         const id = stripBraces(guid);
 
+        const previewLink = actionLink('preview', () => previewRecord(pluralName, id));
+        previewLink.title = 'Show this row next to the current one';
+
         const lookupDisplay = el('span', { className: 'lookupDisplay' },
             '{',
             createBlock([
-                createRow(null,
-                    linkSpan(createApiLink(pluralName, id, id)), ' - ',
-                    linkSpan(createFormLink(lookupLogicalName, guid)), ' - ',
-                    linkSpan(actionLink('Preview', () => previewRecord(pluralName, id)))),
-                createRow(null, createField(determineType(formattedValue), 'Name: ' + formattedValue)),
-                createRow(null, createField(determineType(lookupLogicalName), 'LogicalName: ' + lookupLogicalName)),
-                createRow(null, createField(determineType(navigationProperty), 'NavigationProperty: ' + navigationProperty)),
+                createActionRow([createWebApiLink(id, pluralName), createFormLink(lookupLogicalName, guid), previewLink]),
+                createRow(null, createField('guid', id)),
+                createRow(null, createField(determineType(formattedValue), formattedValue, { label: 'Name: ' })),
+                createRow(null, createField(determineType(lookupLogicalName), lookupLogicalName, { label: 'LogicalName: ' })),
+                createRow(null, createField(determineType(navigationProperty), navigationProperty, { label: 'NavigationProperty: ' })),
             ]),
             '}');
 
         // in edit mode, only the name is displayed
-        const lookupName = el('span', { className: 'lookupEdit' }, createField('string', formattedValue, 'lookupField'));
+        const lookupName = el('span', { className: 'lookupEdit' }, createField('string', formattedValue, { extraClasses: ['lookupField'] }));
 
         return [lookupDisplay, lookupName, createLookupSlot(view, key, guid, lookupLogicalName)];
     }
 
-    // Collections: the remaining top level keys (e.g. @odata.nextLink) followed by the rows
+    // Collections: the remaining top level keys (e.g. @odata.nextLink) followed by the rows, each with its actions as its first line
     async function renderCollectionRows(json, options) {
+        const { logicalName, pluralName, primaryIdAttribute, relationship } = options;
         const rows = [];
 
         for (const key of Object.keys(json)) {
@@ -731,17 +859,37 @@
             }
 
             const value = json[key];
-            rows.push(createRow(key, isObject(value) ? await renderNestedValue(value) : formatDisplayText(value)));
+            rows.push(createRow(key, isObject(value) ? await renderNestedValue(value) : createField(determineType(value), value)));
         }
 
         const records = [];
         for (const record of json.value) {
-            records.push(createRow(null, '{', createBlock(await renderRecordRows(record, options)), '}'));
+            const actions = createRowActions(logicalName, pluralName, record[primaryIdAttribute], relationship);
+            records.push(createRow(null, '{', createBlock([createActionRow(actions), ...await renderPropertyRows(record, options)]), '}'));
         }
 
-        rows.push(createRow(`value (${json.value.length} rows)`, '[', createBlock(records), ']'));
+        rows.push(createRow('value', '[', createBlock(records), ']'));
 
         return rows;
+    }
+
+    // the next page opens in the same tab, like paging usually does
+    function createNextPageLink(nextLink) {
+        return el('a', { href: nextLink + '#p', title: 'Open the next page of rows' }, 'next page');
+    }
+
+    // e.g. '50 rows', '50 of 1234 rows' or '50 of 5000+ rows'
+    // The total count is only known when it is requested with $count=true, it is -1 otherwise
+    function describeRowCount(json) {
+        const rowCount = json.value.length;
+        const totalCount = isNumber(json[odataCountKey]) ? json[odataCountKey] : json[totalRecordCountKey];
+        const isLimitExceeded = json[totalRecordCountLimitExceededKey] === true;
+
+        if (!isNumber(totalCount) || totalCount < 0 || (totalCount === rowCount && !isLimitExceeded)) {
+            return `${rowCount} rows`;
+        }
+
+        return `${rowCount} of ${totalCount}${isLimitExceeded ? '+' : ''} rows`;
     }
 
     // Determines whether the url browses a relationship, e.g. /accounts(id)/contact_customer_accounts
@@ -821,7 +969,7 @@
         }
     }
 
-    // Renders a Web Api response into the container. Returns the rendered panel and its toolbar.
+    // Renders a Web Api response into the container: the header, followed by the response. Returns the rendered panel and its header.
     async function renderPanel(json, container, initialPluralName, { isPreview = false, isCreateMode = false } = {}) {
         if (!isPreview) {
             state.mode = isCreateMode ? 'create' : 'read';
@@ -851,36 +999,77 @@
             pluralName,
             primaryIdAttribute: entity.primaryIdAttribute,
             primaryNameAttribute: entity.primaryNameAttribute,
-            isSingleRecord: !isPreview,
-            isNested: false,
-            isCreateMode,
             relationship,
-            isSingleColumnValueOnly,
             view: null,
         };
 
+        const header = createHeader();
+        const canCreateOrBrowse = !isPreview && relationship == null && logicalName && !isCreateMode;
+
         let rows;
+        let rowActions = []; // the actions on the main row, its first line
         let singleRecordId = null;
 
         if (!logicalName) {
             // sdk messages other than retrieve or retrievemultiple
-            rows = await renderRecordRows(json, { ...recordOptions, relationship: null, isSingleColumnValueOnly: false });
+            header.readContext.append(initialPluralName);
+            rows = await renderPropertyRows(json, { ...recordOptions, relationship: null });
         } else if (isMultiple) {
-            setTitle(relationship != null ? 'related ' + pluralName : pluralName);
-            rows = await renderCollectionRows(json, { ...recordOptions, isSingleRecord: false, isSingleColumnValueOnly: false });
+            const title = relationship != null ? 'related ' + pluralName : pluralName;
+            setTitle(title);
+            header.readContext.append(title, ' ', createMuted(describeRowCount(json)));
+            rows = await renderCollectionRows(json, recordOptions);
         } else {
             setTitle(logicalName);
             singleRecordId = json[entity.primaryIdAttribute];
-            rows = await renderRecordRows(json, { ...recordOptions, view });
+            const hasRecordId = singleRecordId != null && singleRecordId !== '';
+
+            rows = await renderPropertyRows(json, { ...recordOptions, view });
+
+            if (isCreateMode) {
+                header.readContext.append('new ' + logicalName);
+            } else {
+                header.readContext.append(isPreview ? 'preview ' + logicalName : logicalName);
+
+                // the primary name in bold, e.g. 'contact · Amie Gonzales'. Only the table name (and no dot) when the row has no name
+                const primaryName = json[entity.primaryNameAttribute];
+
+                if (primaryName != null && primaryName !== '') {
+                    header.readContext.append(el('span', { className: 'separator' }, '·'), el('b', {}, createField(determineType(primaryName), primaryName, { extraClasses: ['inlineField'] })));
+                } else if (isSingleColumnValueOnly) {
+                    header.readContext.append(' ', createMuted(location.pathname.split('/').pop()));
+                }
+            }
+
+            if (isPreview) {
+                rowActions = createRowActions(logicalName, pluralName, singleRecordId, null);
+            } else if (isCreateMode || hasRecordId) {
+                const editPluralName = await retrievePluralName(logicalName);
+                const id = isCreateMode ? null : stripBraces(singleRecordId);
+                const menu = createEditMenu(view, { logicalName, pluralName: editPluralName, id, isCreateMode, header });
+
+                if (!isCreateMode) {
+                    rowActions = [
+                        createFormLink(logicalName, singleRecordId),
+                        menu.editLink,
+                        canCreateOrBrowse && !isSingleColumnValueOnly ? createRelationshipsLink(logicalName) : null,
+                        relationship ? createDisassociateLink(relationship, pluralName, singleRecordId) : null,
+                        createDeleteLink(editPluralName, id),
+                    ];
+                }
+            }
         }
 
-        const toolbar = el('div', { className: 'pfwa-toolbar' });
-        const panel = el('pre', { className: isPreview ? 'pfwa-root' : 'pfwa-root mainPanel panel' }, toolbar, '{', createBlock(rows), '}');
+        const panel = el('pre', { className: isPreview ? 'pfwa-root' : 'pfwa-root mainPanel panel' },
+            header.element,
+            '{',
+            createBlock([createActionRow(rowActions, 'readOnly'), ...rows]),
+            '}');
 
         container.replaceChildren(panel);
 
         if (isPreview) {
-            return { panel, toolbar };
+            return { panel, header };
         }
 
         document.body.classList.remove('bodyPreviewed');
@@ -888,143 +1077,170 @@
         view.panel = panel;
         state.mainView = view;
 
-        const canCreateOrBrowse = relationship == null && logicalName && !isCreateMode && pluralName !== 'workflows';
+        const newRowLink = canCreateOrBrowse ? actionLink('new row', () => handleCreateNewRecord(logicalName)) : null;
 
-        if (!isCreateMode) {
-            toolbar.append(createToolbarButton('View as raw JSON', () => { window.location.href = window.location.href.split('#')[0]; }));
+        if (newRowLink) {
+            newRowLink.title = 'Create a new row in this table';
         }
 
-        if (canCreateOrBrowse) {
-            const createButton = createToolbarButton('Create new row', async () => {
-                setVisible(createButton, false);
-                await handleCreateNewRecord(logicalName);
-            });
-            toolbar.append(createButton);
-        }
-
-        if (canCreateOrBrowse && !isSingleColumnValueOnly && !isMultiple) {
-            const browseButton = createToolbarButton('View relationships', async () => {
-                setVisible(browseButton, false);
-                await handleBrowseRelationships(logicalName);
-            });
-            toolbar.append(browseButton);
-        }
+        setActions(header.readActions, [
+            isMultiple && typeof json[nextLinkKey] === 'string' ? createNextPageLink(json[nextLinkKey]) : null,
+            newRowLink,
+            isCreateMode ? null : el('a', { href: window.location.href.split('#')[0], title: 'Show the response of the Web Api as is' }, 'raw json'),
+        ]);
 
         const clientdata = state.originalRecord?.clientdata;
         if (!isMultiple && pluralName === 'workflows' && typeof clientdata === 'string' && clientdata.startsWith('{"')) {
-            createMonacoEditorControls(panel, toolbar, singleRecordId, clientdata);
+            createMonacoEditorControls(panel, header, singleRecordId, clientdata);
         }
 
-        return { panel, toolbar };
+        return { panel, header };
+    }
+
+    function createRelationshipsLink(logicalName) {
+        const link = actionLink('relationships', () => handleBrowseRelationships(logicalName));
+        link.title = 'Browse the relationships of this row';
+
+        return link;
+    }
+
+    function createDeleteLink(pluralName, id) {
+        const link = actionLink('delete', () => deleteRecord(pluralName, id), 'dangerLink');
+        link.title = 'Delete this row';
+
+        return link;
     }
 
     // ---------------------------------------------------------------------
     // Edit menu
     // ---------------------------------------------------------------------
 
-    function createEditMenu(view, { logicalName, pluralName, id, isCreateMode }) {
-        function createCheckbox(label, checked = false) {
+    /*
+     * The edit controls of the main row:
+     *   editLink: the 'edit' action, on the first line of the row
+     *   in the header while editing: what is edited, the number of changes, save and cancel,
+     *   and below that the options, the impersonation inputs and the changes to commit
+     */
+    function createEditMenu(view, { logicalName, pluralName, id, isCreateMode, header }) {
+        function createCheckbox(label, title, checked = false) {
             const input = el('input', { type: 'checkbox', checked });
-            return { input, row: el('div', { className: 'checkBoxDiv' }, label, input) };
+            return { input, label: el('label', { className: 'editOption', title }, input, label) };
         }
 
-        const bypassPlugins = createCheckbox('Bypass Custom Plugin execution');
-        const bypassFlows = createCheckbox('Bypass Power Automate Flow execution');
-        const previewChanges = createCheckbox('Preview changes before committing save', true);
-        const impersonate = createCheckbox('Impersonate another user');
-        const rememberSettings = createCheckbox('Remember these settings (for this environment)');
+        const previewChanges = createCheckbox('preview changes', 'Show the changes before committing the save', true);
+        const bypassPlugins = createCheckbox('bypass plugins', 'Bypass custom plugin execution');
+        const bypassFlows = createCheckbox('bypass flows', 'Bypass Power Automate flow execution');
+        const impersonate = createCheckbox('impersonate', isCreateMode ? 'Create as another user' : 'Update as another user');
+        const rememberSettings = createCheckbox('remember', 'Remember these settings for this environment');
 
         const impersonationField = el('select', { on: { change: () => setImpersonationField(impersonationField.value) } },
             el('option', { value: 'systemuserid' }, 'systemuserid'),
             el('option', { value: 'azureactivedirectoryobjectid' }, 'azureactivedirectoryobjectid'));
         const impersonationLabel = el('span', { className: 'impersonationIdFieldLabel' }, 'systemuserid:');
-        const impersonationInput = el('input', { placeholder: emptyGuid, on: { input: () => updateImpersonationPreview() } });
-        const impersonationPreview = el('span', { className: 'impersonateUserPreview' });
+        const userSearch = createRecordSearch({
+            getLogicalName: () => 'systemuser',
+            getIdColumn: () => impersonationField.value,
+            placeholder: 'Search a user, or paste a guid'
+        });
 
         const impersonateDiv = el('div', { className: 'impersonateDiv pfwa-hidden' },
             el('div', {}, 'Base impersonation on this field: ', impersonationField, '  ', el('i', {}, el('a', { href: impersonationDocsUrl, target: '_blank' }, "What's this?"))),
-            el('div', {}, impersonationLabel, impersonationInput, '  ', impersonationPreview));
+            el('div', {}, 'Search users by: ', userSearch.searchBySelect),
+            el('div', {}, impersonationLabel, userSearch.element, userSearch.preview));
 
-        const editLink = actionLink('Edit this row', () => editRecord(logicalName, pluralName, id, isCreateMode), 'editLink');
-        const cancelLink = actionLink('Cancel', () => reloadPage(pluralName));
-        const submitLink = actionLink('Save', async () => {
-            setVisible(cancelLink, false);
-            setVisible(submitLink, false);
+        const editLink = actionLink('edit', () => editRecord(logicalName, pluralName, id, isCreateMode));
+        editLink.title = 'Edit the columns of this row';
+
+        const saveLink = actionLink('save', async () => {
+            setHeaderState('saving');
             await submitEdit(pluralName, id, isCreateMode);
-        });
-        const previewContainer = el('div', { className: 'previewChangesDiv' });
-        const savingIndicator = el('div', { className: 'saveInProgressDiv pfwa-hidden' }, 'Saving...');
+        }, 'primaryLink');
+        const cancelLink = actionLink('cancel', () => reloadPage(pluralName));
+        // below the changes, away from 'save' in the header, so a double click on 'save' does not commit
+        const commitLink = actionLink('commit save', async () => {
+            const { changes, impersonateHeader } = menu.pendingSave;
+            await commitSave(pluralName, id, changes, impersonateHeader, isCreateMode, true);
+        }, 'primaryLink');
+        commitLink.title = 'Save the changes listed above';
+        const backLink = actionLink('back', () => resetSubmitControls());
+        backLink.title = 'Go back to editing';
 
-        const element = el('div', { className: 'editMenuDiv pf-link pfwa-hidden' },
-            bypassPlugins.row,
-            bypassFlows.row,
-            previewChanges.row,
-            impersonate.row,
-            rememberSettings.row,
-            impersonateDiv,
-            previewContainer,
-            el('div', { className: 'editMenuAction' }, cancelLink),
-            el('div', { className: 'editMenuAction' }, submitLink),
-            savingIndicator);
+        const changeCount = createMuted('');
+
+        const savingNote = createMuted(' · saving…');
+
+        // The header always shows 'save · cancel' while editing, so nothing moves under the cursor:
+        // editing: both active, confirm: save disabled (committing is below the changes),
+        // saving: both disabled, until the page is replaced (after a successful save) or the save fails and editing resumes.
+        function setHeaderState(headerState) {
+            const isSaving = headerState === 'saving';
+            const isCommitting = isSaving && menu.pendingSave != null;
+
+            for (const link of [cancelLink, commitLink, backLink]) {
+                link.classList.toggle('disabled', isSaving);
+            }
+
+            saveLink.classList.toggle('disabled', headerState !== 'editing');
+
+            setVisible(savingNote, isSaving);
+            setVisible(commitActions, headerState === 'confirm' || isCommitting);
+        }
+
+        setActions(header.editActions, [saveLink, cancelLink]);
+
+        header.editContext.append((isCreateMode ? 'new ' : 'editing ') + logicalName, ' ', changeCount, savingNote);
+
+        const previewContainer = el('div', { className: 'previewChangesDiv' });
+        const commitActions = el('div', { className: 'commitActions actions pfwa-hidden' }, commitLink, backLink); // 'commit save · back', in the same order as 'save · cancel'
+
+        const options = el('div', { className: 'editOptions' },
+            [previewChanges, bypassPlugins, bypassFlows, impersonate, rememberSettings].map(checkbox => checkbox.label));
+
+        header.editBody.append(options, impersonateDiv, previewContainer, commitActions);
+        setHeaderState('editing');
 
         function setImpersonationEnabled(enabled) {
             impersonate.input.checked = enabled;
             setVisible(impersonateDiv, enabled);
+
+            if (enabled) {
+                userSearch.prepare();
+            }
         }
 
         function setImpersonationField(field) {
             impersonationField.value = field;
             impersonationLabel.textContent = field + ':';
-            updateImpersonationPreview();
+            userSearch.search();
         }
 
         function setImpersonatedUser(field, userId) {
             setImpersonationEnabled(true);
-            impersonationInput.value = userId;
+            userSearch.input.value = userId;
             setImpersonationField(field);
-        }
-
-        async function updateImpersonationPreview() {
-            if (!impersonationInput.value) {
-                impersonationPreview.textContent = '';
-                return;
-            }
-
-            const result = await odataFetch(apiUrl + `systemusers?$filter=${impersonationField.value} eq '${impersonationInput.value}'&$select=fullname`, false);
-
-            if (result.error) {
-                impersonationPreview.textContent = result.error.message;
-            } else if (result.value.length == 0) {
-                impersonationPreview.textContent = 'user not found';
-            } else if (result.value.length == 1) {
-                impersonationPreview.textContent = result.value[0].fullname;
-            } else {
-                impersonationPreview.textContent = 'Something went wrong with retrieving the systemuser.';
-            }
         }
 
         impersonate.input.addEventListener('change', () => setImpersonationEnabled(impersonate.input.checked));
 
-        if (view) {
-            view.editMenu = {
-                element,
-                editLink,
-                cancelLink,
-                submitLink,
-                previewContainer,
-                savingIndicator,
-                bypassPlugins: bypassPlugins.input,
-                bypassFlows: bypassFlows.input,
-                previewChanges: previewChanges.input,
-                impersonate: impersonate.input,
-                impersonationField,
-                impersonationInput,
-                rememberSettings: rememberSettings.input,
-                setImpersonatedUser,
-            };
-        }
+        const menu = {
+            editLink,
+            changeCount,
+            previewContainer,
+            setHeaderState,
+            pendingSave: null, // the changes which are previewed, saved when committing
+            bypassPlugins: bypassPlugins.input,
+            bypassFlows: bypassFlows.input,
+            previewChanges: previewChanges.input,
+            impersonate: impersonate.input,
+            impersonationField,
+            impersonationSearch: userSearch,
+            rememberSettings: rememberSettings.input,
+            setImpersonatedUser,
+        };
 
-        return [linkSpan(editLink), element];
+        view.editMenu = menu;
+
+        return menu;
     }
 
     function applySettings(menu) {
@@ -1142,11 +1358,8 @@
         // in some very rare cases, dataverse will return an empty string instead of null
         const isEmptyString = value === '';
 
-        if (dataType === 'memo') {
-            slot.element.classList.add('memoField');
-        }
-
-        slot.element.append(input);
+        // a textarea goes on a line of its own, below the row
+        slot.element.append(dataType === 'memo' ? el('div', { className: 'memoEditor' }, input) : input);
 
         return {
             fieldName,
@@ -1309,7 +1522,7 @@
 
         updateSummary();
 
-        slot.element.append(el('div', {}, fakeSelect, dropdown));
+        slot.element.append(el('span', { className: 'multiSelectEditor' }, fakeSelect, dropdown));
 
         return {
             fieldName,
@@ -1322,6 +1535,251 @@
         };
     }
 
+    // A combined input which holds the id of a row. Typing text searches the rows of a table on the
+    // 'search by' column, a pasted guid is looked up as id directly. When no row has that id, the guid
+    // is searched for as text, as it can also be the content of a column. Picking a result puts its id in the input.
+    // getLogicalName: the table to search. getIdColumn(entity): the column whose value goes into the input.
+    function createRecordSearch({ getLogicalName, getIdColumn, placeholder }) {
+        const input = el('input', {
+            placeholder,
+            autocomplete: 'off',
+            spellcheck: false,
+            on: {
+                input: () => scheduleSearch(),
+                keydown: (e) => onKeyDown(e),
+                focus: () => setResultsOpen(items.length > 0 || emptyMessage != null),
+                blur: () => setResultsOpen(false)
+            }
+        });
+
+        const searchBySelect = el('select', { className: 'searchBySelect', on: { change: () => searchAgain() } });
+        const results = el('div', { className: 'recordSearchResults pfwa-hidden', on: { mousedown: (e) => e.preventDefault() } }); // keep the focus on the input
+        const preview = el('span', { className: 'lookupPreview' });
+        const element = el('span', { className: 'recordSearch' }, input, results);
+
+        let metadataPromise = null;
+        let items = []; // { id, name, matchedValue }
+        let emptyMessage = null;
+        let activeIndex = -1;
+        let searchTimer = null;
+        let requestNumber = 0; // responses of outdated requests are ignored
+
+        function loadMetadata() {
+            metadataPromise ??= retrieveSearchMetadata(getLogicalName()).then(metadata => {
+                const previous = searchBySelect.value;
+                searchBySelect.replaceChildren(...metadata.searchColumns.map(column =>
+                    el('option', { value: column }, column === metadata.primaryName ? column + ' (primary column)' : column)));
+                searchBySelect.disabled = metadata.searchColumns.length === 0;
+
+                if (metadata.searchColumns.includes(previous)) {
+                    searchBySelect.value = previous;
+                }
+                return metadata;
+            });
+            return metadataPromise;
+        }
+
+        // accepts guids wrapped in braces, as copied from some places
+        function currentText() {
+            return input.value.trim().replace(/^\{(.*)\}$/, '$1');
+        }
+
+        function scheduleSearch() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => search(), searchDelayMs);
+        }
+
+        function searchAgain() {
+            if (input.value.trim()) {
+                search();
+            }
+        }
+
+        async function fetchRows(metadata, idColumn, filter, top) {
+            const { entity, primaryName } = metadata;
+            const searchColumn = searchBySelect.value;
+            const columns = [...new Set([idColumn, primaryName, searchColumn].filter(Boolean))];
+
+            let url = `${apiUrl}${entity.EntitySetName}?$select=${columns.join(',')}&$filter=${filter}&$top=${top}`;
+
+            // most recently changed rows first
+            if (top > 1 && metadata.hasModifiedOn) {
+                url += '&$orderby=modifiedon desc';
+            }
+
+            const json = await odataFetch(url, false);
+
+            if (json.error) {
+                throw new Error(json.error.message);
+            }
+
+            return json.value.map(row => ({
+                id: row[idColumn],
+                name: primaryName ? row[primaryName] : null,
+                matchedValue: searchColumn !== primaryName ? row[searchColumn] : null
+            }));
+        }
+
+        async function search() {
+            clearTimeout(searchTimer);
+
+            const request = ++requestNumber;
+            const text = currentText();
+
+            if (!text) {
+                preview.textContent = '';
+                showResults([], null);
+                return;
+            }
+
+            // the previous results stay visible until the new ones arrive
+            preview.textContent = 'searching...';
+
+            let outcome;
+            try {
+                outcome = await findRows(text);
+            } catch (error) {
+                outcome = { status: error.message, rows: [] };
+            }
+
+            if (request !== requestNumber) {
+                return;
+            }
+
+            if (outcome.resolvedId) {
+                input.value = outcome.resolvedId; // without braces
+            }
+
+            preview.textContent = outcome.status;
+            showResults(outcome.rows, outcome.message ?? null);
+        }
+
+        // returns the preview status text, the rows to pick from and an optional message for when there are no rows
+        async function findRows(text) {
+            const metadata = await loadMetadata();
+
+            if (metadata.entity == null) {
+                return { status: 'table ' + getLogicalName() + ' not found', rows: [] };
+            }
+
+            const idColumn = getIdColumn(metadata.entity);
+            const isGuid = guidPattern.test(text);
+
+            if (isGuid) {
+                const [row] = await fetchRows(metadata, idColumn, `${idColumn} eq ${text}`, 1);
+
+                if (row) {
+                    return { status: row.name ?? '(no name)', rows: [], resolvedId: text };
+                }
+            }
+
+            // a guid which is not an id is searched for as text, as it can also be the content of a column
+            const status = isGuid ? 'no row found with this id' : '';
+            const searchColumn = searchBySelect.value;
+
+            if (!searchColumn) {
+                return { status: isGuid ? status : 'this table has no searchable columns', rows: [] };
+            }
+
+            let filter = `contains(${searchColumn},'${encodeURIComponent(text.replaceAll(`'`, `''`))}')`;
+
+            // e.g. users without an azureactivedirectoryobjectid cannot be picked
+            if (idColumn !== metadata.entity.PrimaryIdAttribute) {
+                filter += ` and ${idColumn} ne null`;
+            }
+
+            const rows = await fetchRows(metadata, idColumn, filter, maxSearchResults);
+
+            return { status, rows, message: rows.length === 0 ? `No rows found where ${searchColumn} contains '${text}'` : null };
+        }
+
+        function showResults(rows, message) {
+            items = rows;
+            emptyMessage = message;
+            activeIndex = -1;
+
+            results.replaceChildren();
+            appendChildren(results, [
+                rows.map((row, index) => el('div', { className: 'recordSearchItem', on: { click: () => pick(index), mousemove: () => setActive(index) } },
+                    el('div', { className: 'recordSearchName' }, row.name ?? '(no name)'),
+                    row.matchedValue != null ? el('div', { className: 'recordSearchDetail' }, searchBySelect.value + ': ' + row.matchedValue) : null,
+                    el('div', { className: 'recordSearchDetail' }, row.id))),
+                message != null ? el('div', { className: 'recordSearchEmpty' }, message) : null]);
+
+            // results which arrive after the user left the input are shown when it gets the focus again
+            setResultsOpen(document.activeElement === input && (rows.length > 0 || message != null));
+        }
+
+        function setResultsOpen(open) {
+            setVisible(results, open);
+        }
+
+        function setActive(index) {
+            activeIndex = index;
+            [...results.children].forEach((child, i) => child.classList.toggle('active', i === index));
+        }
+
+        function pick(index) {
+            const row = items[index];
+
+            requestNumber++; // ignore searches which are still running
+            clearTimeout(searchTimer);
+
+            input.value = row.id;
+            preview.textContent = row.name ?? '(no name)';
+            showResults([], null);
+        }
+
+        function onKeyDown(e) {
+            const isOpen = !results.classList.contains('pfwa-hidden');
+
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                if (items.length === 0) {
+                    return;
+                }
+                e.preventDefault();
+                setResultsOpen(true);
+
+                const step = e.key === 'ArrowDown' ? 1 : -1;
+                setActive(isOpen ? (activeIndex + step + items.length) % items.length : (step === 1 ? 0 : items.length - 1));
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+
+                if (isOpen && activeIndex >= 0) {
+                    pick(activeIndex);
+                } else {
+                    search();
+                }
+            } else if (e.key === 'Escape' && isOpen) {
+                e.preventDefault();
+                setResultsOpen(false);
+            }
+        }
+
+        return {
+            input,
+            searchBySelect,
+            preview,
+            element,
+            search,
+            // call when the table changed, to load its searchable columns and search again
+            tableChanged: () => {
+                metadataPromise = null;
+                searchAgain();
+            },
+            clear: () => {
+                requestNumber++;
+                clearTimeout(searchTimer);
+                input.value = '';
+                preview.textContent = '';
+                showResults([], null);
+            },
+            // loads the 'search by' options in advance
+            prepare: () => loadMetadata().catch(error => preview.textContent = error.message),
+            value: currentText
+        };
+    }
+
     function createLookupEditor(slot, targets) {
         const { fieldName } = slot;
         const initialTable = slot.lookupType ?? targets[0];
@@ -1330,22 +1788,30 @@
             targets.map(target => el('option', { value: target }, target)));
         tableSelect.value = initialTable;
 
-        const input = el('input', { placeholder: emptyGuid, on: { input: () => updatePreview() } });
-        const preview = el('span', { className: 'lookupPreview' });
+        const search = createRecordSearch({
+            getLogicalName: () => tableSelect.value,
+            getIdColumn: (entity) => entity.PrimaryIdAttribute,
+            placeholder: 'Search, or paste a guid'
+        });
 
         const editPanel = el('div', { className: 'lookupEditMenuDiv pfwa-hidden' },
             el('div', { className: 'lookupEditRow' }, 'Table: ', tableSelect),
-            el('div', { className: 'lookupEditRow' }, 'Row id:', input, preview));
+            el('div', { className: 'lookupEditRow' }, 'Search by: ', search.searchBySelect),
+            el('div', { className: 'lookupEditRow' }, 'Row:', search.element, search.preview));
 
         const makeNullNotice = el('div', { className: 'makeLookupNullDiv pfwa-hidden' }, el('b', {}, 'Lookup will be cleared (will be set to null)'));
 
-        const undoItem = linkSpan(actionLink('Undo changes', () => undo()));
-        setVisible(undoItem, false);
+        const editLink = actionLink('edit', () => beginEdit('update'));
+        editLink.title = 'Point this lookup to another row';
+        const clearLink = actionLink('clear', () => beginEdit('makenull'));
+        clearLink.title = 'Clear this lookup (set it to null)';
+        const undoLink = actionLink('undo', () => undo());
+        undoLink.title = 'Undo the changes to this lookup';
 
-        const links = el('span', { className: 'lookupEditLinks' },
-            linkSpan(actionLink('Edit lookup', () => beginEdit('update'))),
-            linkSpan(actionLink('Clear lookup', () => beginEdit('makenull'))),
-            undoItem);
+        // e.g. 'edit · clear · undo', undo is only shown when the lookup was changed
+        setVisible(undoLink, false);
+
+        const links = el('span', { className: 'lookupEditLinks actions' }, editLink, clearLink, undoLink);
 
         slot.element.append(links, makeNullNotice, editPanel);
 
@@ -1364,25 +1830,9 @@
         }
 
         async function onTableChanged() {
+            search.tableChanged();
+            search.prepare();
             await syncSelectedTable();
-            await updatePreview();
-        }
-
-        async function updatePreview() {
-            if (!input.value) {
-                preview.textContent = '';
-                return;
-            }
-
-            if (!tableSelect.value) {
-                alert('selectTable does not contain a value. This should not happen.');
-                return;
-            }
-
-            const entity = await findEntityByLogicalName(tableSelect.value);
-            const record = await odataFetch(apiUrl + `${entity.EntitySetName}(${input.value})?$select=${entity.PrimaryNameAttribute}`, false);
-
-            preview.textContent = record.error ? record.error.message : record[entity.PrimaryNameAttribute];
         }
 
         async function beginEdit(editMode) {
@@ -1397,19 +1847,21 @@
             editor.editMode = editMode;
 
             if (editMode === 'makenull') {
-                input.value = '';
+                search.clear();
+            } else {
+                search.prepare();
             }
 
             setVisible(makeNullNotice, editMode === 'makenull');
             setVisible(editPanel, editMode === 'update');
-            setVisible(undoItem, true);
+            setVisible(undoLink, true);
         }
 
         function undo() {
             editor.editMode = null;
-            input.value = '';
+            search.clear();
 
-            setVisible(undoItem, false);
+            setVisible(undoLink, false);
             setVisible(makeNullNotice, false);
             setVisible(editPanel, false);
         }
@@ -1430,18 +1882,17 @@
                 return { originalValue, value: null };
             }
 
-            const inputValue = input.value;
-            const value = `/${await retrievePluralName(tableSelect.value)}(${inputValue})`;
+            const inputValue = search.value();
 
             if (inputValue === '') {
                 throw new UserError('Error for lookup field: ' + fieldName + '. The field was marked for update but it is empty. If you do not want to edit this field, hit "undo changes".');
             }
 
-            if (inputValue.length !== 36) {
-                throw new UserError('Error for lookup field: ' + fieldName + '. The value ' + value + ' is not a valid guid.');
+            if (!guidPattern.test(inputValue)) {
+                throw new UserError('Error for lookup field: ' + fieldName + '. The value ' + inputValue + ' is not a valid guid. Pick a row from the search results, or paste a guid.');
             }
 
-            return { originalValue, value };
+            return { originalValue, value: `/${await retrievePluralName(tableSelect.value)}(${inputValue})` };
         }
 
         // make sure the navigation property matches the selected table
@@ -1473,8 +1924,84 @@
         const view = state.mainView;
         state.mode = isCreateMode ? 'create' : 'update';
 
-        setVisible(view.editMenu.editLink, false);
+        // long values are cut off again while editing, the editors show all of them
+        for (const link of view.panel.querySelectorAll('.showingAll > .showAllLink')) {
+            link.setShowAll(false);
+        }
 
+        try {
+            if (!isCreateMode) {
+                await addMissingStateOrStatus(view, pluralName, id);
+            }
+
+            await createEditors(view, logicalName, isCreateMode);
+        } catch (error) {
+            // show the plain error, and cancel the edit once it is dismissed
+            console.error(error);
+            alert(error?.message ?? String(error));
+            await reloadPage(pluralName);
+            return;
+        }
+
+        view.panel.classList.add('editing');
+
+        applySettings(view.editMenu);
+
+        // keep the number of changes in the header up to date
+        let countTimeout = null;
+        const scheduleCount = () => {
+            clearTimeout(countTimeout);
+            countTimeout = setTimeout(() => updateChangeCount(view, isCreateMode), 150);
+        };
+
+        for (const eventName of ['input', 'change', 'click']) {
+            view.panel.addEventListener(eventName, scheduleCount);
+        }
+
+        updateChangeCount(view, isCreateMode);
+    }
+
+    // A status belongs to a state, so statecode and statuscode are edited together: when the row shows only one of them,
+    // the current value of the other is retrieved and shown next to it, only while editing.
+    async function addMissingStateOrStatus(view, pluralName, id) {
+        const record = state.originalRecord;
+        const present = ['statecode', 'statuscode'].filter(name => name in record);
+
+        if (present.length !== 1 || !view.slots.has(present[0])) {
+            return;
+        }
+
+        const [presentName] = present;
+        const missingName = presentName === 'statecode' ? 'statuscode' : 'statecode';
+
+        const json = await odataFetch(`${apiUrl}${pluralName}(${id})?$select=${missingName}`, false);
+
+        if (json.error) {
+            throw new Error(json.error.message);
+        }
+
+        record[missingName] = json[missingName] ?? null; // the value the change is compared with
+
+        const slotsBefore = [...view.slots];
+        const row = createRow(createCopyableKey(missingName),
+            await renderPropertyValue(json, missingName, { view }, new Set()),
+            createMuted(`  not selected, edited together with ${presentName}`));
+        row.classList.add('editOnly');
+
+        // in the same place as when both are selected: statecode first
+        const presentRow = view.slots.get(presentName).element.closest('.pfwa-row');
+        const missingFirst = missingName === 'statecode';
+        presentRow[missingFirst ? 'before' : 'after'](row);
+
+        // the slots are in the displayed order, so that the changes are listed in that order
+        const missingSlot = view.slots.get(missingName);
+        view.slots = new Map(slotsBefore.flatMap(entry => entry[0] !== presentName
+            ? [entry]
+            : missingFirst ? [[missingName, missingSlot], entry] : [entry, [missingName, missingSlot]]));
+    }
+
+    // creates an editor for every editable column of the row
+    async function createEditors(view, logicalName, isCreateMode) {
         const attributes = await retrieveEditableAttributes(logicalName, isCreateMode);
 
         const [picklist, multiSelect, stateOptions, status, boolean] = await Promise.all([
@@ -1502,11 +2029,27 @@
                 view.editors.push(editor);
             }
         }
+    }
 
-        view.panel.classList.add('editing');
-        setVisible(view.editMenu.element, true);
+    // e.g. '2 changes' or '1 change · invalid value'
+    async function updateChangeCount(view, isCreateMode) {
+        let count = 0;
+        let hasInvalidValue = false;
 
-        applySettings(view.editMenu);
+        for (const editor of view.editors) {
+            try {
+                if (await readEditorChange(editor, isCreateMode)) {
+                    count++;
+                }
+            } catch (error) {
+                if (!(error instanceof UserError)) {
+                    throw error;
+                }
+                hasInvalidValue = true;
+            }
+        }
+
+        view.editMenu.changeCount.textContent = `${count} ${count === 1 ? 'change' : 'changes'}${hasInvalidValue ? ' · invalid value' : ''}`;
     }
 
     // disables all controls while previewing changes, so that no edits can be made after previewing
@@ -1526,9 +2069,8 @@
         const view = state.mainView;
         const menu = view.editMenu;
 
-        setVisible(menu.savingIndicator, false);
-        setVisible(menu.cancelLink, true);
-        setVisible(menu.submitLink, true);
+        menu.setHeaderState('editing');
+        menu.pendingSave = null;
         menu.previewContainer.replaceChildren();
 
         setControlsLocked(view, false);
@@ -1546,31 +2088,42 @@
         return true;
     }
 
+    // returns { column, payloadKey, oldValue, newValue } when the value of the editor changed, null otherwise
+    // throws a UserError when the value is invalid
+    async function readEditorChange(editor, isCreateMode) {
+        if (editor.dataType === 'lookup') {
+            const change = await editor.readChange();
+
+            if (change == null || !hasChanged(change.value, change.originalValue, 'lookup')) {
+                return null;
+            }
+
+            return {
+                column: editor.navigationProperty,
+                payloadKey: `${editor.navigationProperty}@odata.bind`,
+                oldValue: change.originalValue,
+                newValue: change.value
+            };
+        }
+
+        // if not found for some reason, normalize to null to prevent issues
+        const originalValue = isCreateMode ? null : (state.originalRecord[editor.fieldName] ?? null);
+        const value = editor.read();
+
+        return hasChanged(value, originalValue, editor.dataType)
+            ? { column: editor.fieldName, payloadKey: editor.fieldName, oldValue: originalValue, newValue: value }
+            : null;
+    }
+
     // returns a list of { column, payloadKey, oldValue, newValue }
     async function collectChanges(editors, isCreateMode) {
         const changes = [];
 
         for (const editor of editors) {
-            if (editor.dataType === 'lookup') {
-                const change = await editor.readChange();
+            const change = await readEditorChange(editor, isCreateMode);
 
-                if (change != null && hasChanged(change.value, change.originalValue, 'lookup')) {
-                    changes.push({
-                        column: editor.navigationProperty,
-                        payloadKey: `${editor.navigationProperty}@odata.bind`,
-                        oldValue: change.originalValue,
-                        newValue: change.value
-                    });
-                }
-                continue;
-            }
-
-            // if not found for some reason, normalize to null to prevent issues
-            const originalValue = isCreateMode ? null : (state.originalRecord[editor.fieldName] ?? null);
-            const value = editor.read();
-
-            if (hasChanged(value, originalValue, editor.dataType)) {
-                changes.push({ column: editor.fieldName, payloadKey: editor.fieldName, oldValue: originalValue, newValue: value });
+            if (change) {
+                changes.push(change);
             }
         }
 
@@ -1583,14 +2136,14 @@
         }
 
         const field = menu.impersonationField.value;
-        const userId = menu.impersonationInput.value;
+        const userId = menu.impersonationSearch.value();
 
         if (userId == null || userId === '') {
             throw new UserError('User impersonation was checked, but ' + field + ' is empty');
         }
 
-        if (userId.length !== 36) {
-            throw new UserError('User impersonation input error: ' + userId + ' is not a valid guid.');
+        if (!guidPattern.test(userId)) {
+            throw new UserError('User impersonation input error: ' + userId + ' is not a valid guid. Pick a user from the search results, or paste a guid.');
         }
 
         if (field === 'systemuserid') {
@@ -1633,25 +2186,17 @@
 
         setControlsLocked(view, true);
 
-        const cancelLink = actionLink('Cancel', () => reloadPage(pluralName));
-        const commitLink = actionLink('Commit Save', async () => {
-            setVisible(commitLink, false);
-            setVisible(cancelLink, false);
-            await commitSave(pluralName, id, changes, impersonateHeader, isCreateMode, true);
-        });
+        // the changes are listed in the header, with 'commit save' below them
+        view.editMenu.pendingSave = { changes, impersonateHeader };
+        view.editMenu.setHeaderState('confirm');
 
-        view.editMenu.previewContainer.replaceChildren(
-            createChangesTable(changes, isCreateMode),
-            el('div', { className: 'editMenuAction' }, cancelLink),
-            el('div', { className: 'editMenuAction' }, commitLink));
+        view.editMenu.previewContainer.replaceChildren(changes.length > 0
+            ? createChangesTable(changes, isCreateMode)
+            : el('div', {}, createMuted('no changes')));
     }
 
     function createChangesTable(changes, isCreateMode) {
         const table = el('table', { id: 'previewTable' });
-
-        if (changes.length === 0) {
-            return table;
-        }
 
         const columns = isCreateMode ? ['column', 'new'] : ['column', 'old', 'new'];
         const cellText = (value) => value == null ? '(empty)' : String(value);
@@ -1687,14 +2232,24 @@
 
         saveSettings(menu, impersonateHeader, bypassCustomPluginExecution, bypassFlowExecution, wasPreviewEnabled);
 
-        setVisible(menu.savingIndicator, true);
+        menu.setHeaderState('saving');
 
-        const response = await fetch(isCreateMode ? apiUrl + pluralName : apiUrl + pluralName + '(' + id + ')', {
-            method: isCreateMode ? 'POST' : 'PATCH',
-            headers,
-            body: JSON.stringify(Object.fromEntries(changes.map(change => [change.payloadKey, change.newValue])))
-        });
+        let response;
 
+        try {
+            response = await fetch(isCreateMode ? apiUrl + pluralName : apiUrl + pluralName + '(' + id + ')', {
+                method: isCreateMode ? 'POST' : 'PATCH',
+                headers,
+                body: JSON.stringify(Object.fromEntries(changes.map(change => [change.payloadKey, change.newValue])))
+            });
+        } catch (error) {
+            // no response at all, e.g. offline. Nothing was saved, so editing resumes
+            alert(error?.message ?? String(error));
+            resetSubmitControls();
+            return;
+        }
+
+        // the save failed, editing resumes with the changes kept
         if (!response.ok) {
             await alertErrorResponse(response);
             resetSubmitControls();
@@ -1706,12 +2261,22 @@
             const { primaryIdAttribute } = await retrieveEntityInfo(pluralName);
             window.location.href = apiUrl + pluralName + '(' + json[primaryIdAttribute] + ')#p';
         } else {
-            reloadPage(pluralName);
+            await reloadPage(pluralName);
         }
+
+        // the actions stay disabled until the page is replaced
     }
 
     async function handleCreateNewRecord(logicalName) {
-        const creatableAttributes = await retrieveAttributes(logicalName, 'IsValidForCreate');
+        let creatableAttributes;
+
+        try {
+            creatableAttributes = await retrieveAttributes(logicalName, 'IsValidForCreate');
+        } catch (error) {
+            alert(error.message);
+            return;
+        }
+
         const emptyRecord = {};
 
         for (const attribute of creatableAttributes) {
@@ -1727,29 +2292,23 @@
         await editRecord(logicalName, state.currentPluralName, null, true);
     }
 
-    async function deleteRecord(pluralName, id, deleteLink) {
-        setVisible(deleteLink, false);
+    async function deleteRecord(pluralName, id) {
+        if (!confirm('Are you sure you want to delete this row?')) {
+            return;
+        }
 
-        try {
-            if (!confirm('Are you sure you want to delete this row?')) {
-                return;
+        const response = await fetch(apiUrl + pluralName + '(' + id + ')', { method: 'DELETE' });
+
+        if (response.status === 204) {
+            if (confirm('Row was deleted. Click OK to close this page.')) {
+                window.close();
             }
+        } else {
+            const json = await response.json();
 
-            const response = await fetch(apiUrl + pluralName + '(' + id + ')', { method: 'DELETE' });
-
-            if (response.status === 204) {
-                if (confirm('Row was deleted. Click OK to close this page.')) {
-                    window.close();
-                }
-            } else {
-                const json = await response.json();
-
-                if (json.error) {
-                    alert(json.error.message);
-                }
+            if (json.error) {
+                alert(json.error.message);
             }
-        } finally {
-            setVisible(deleteLink, true);
         }
     }
 
@@ -1791,28 +2350,53 @@
     // Preview
     // ---------------------------------------------------------------------
 
-    async function previewRecord(pluralName, id) {
-        const mainPanel = state.mainView.panel;
+    // While previewing, the main panel scrolls by itself instead of the page. These keep the same rows in view when switching.
+    function enterPreviewLayout(mainPanel) {
+        if (mainPanel.classList.contains('prePreviewed')) {
+            return; // already previewing another row, the main panel keeps its own scroll position
+        }
+
+        const scrolledPastPanelTop = -mainPanel.getBoundingClientRect().top;
+
         mainPanel.classList.add('prePreviewed');
         document.body.classList.add('bodyPreviewed');
+
+        mainPanel.scrollTop = scrolledPastPanelTop;
+    }
+
+    function leavePreviewLayout(mainPanel) {
+        const scrolledPastPanelTop = mainPanel.scrollTop;
+
+        mainPanel.classList.remove('prePreviewed');
+        document.body.classList.remove('bodyPreviewed');
+
+        window.scrollTo(window.scrollX, mainPanel.getBoundingClientRect().top + window.scrollY + scrolledPastPanelTop);
+    }
+
+    async function previewRecord(pluralName, id) {
+        const mainPanel = state.mainView.panel;
+        enterPreviewLayout(mainPanel);
 
         const previewPanel = el('div', { className: 'panel previewPanel prePreviewed' });
         document.body.appendChild(previewPanel);
 
         const response = await odataFetch(apiUrl + pluralName + '(' + id + ')', false);
 
-        const { toolbar } = await renderPanel(response, previewPanel, pluralName, { isPreview: true });
+        const { header } = await renderPanel(response, previewPanel, pluralName, { isPreview: true });
 
-        toolbar.append(createToolbarButton('Close Preview', () => {
+        const closeLink = actionLink('close', () => {
             if (document.getElementsByClassName('previewPanel').length === 1) {
-                mainPanel.classList.remove('prePreviewed');
-                document.body.classList.remove('bodyPreviewed');
+                leavePreviewLayout(mainPanel);
             }
 
             previewPanel.remove();
-        }));
+        });
+        closeLink.title = 'Close this preview';
 
-        previewPanel.scrollIntoView();
+        setActions(header.readActions, [closeLink]);
+
+        // only scroll sideways to bring the preview into view (when there are multiple), never the main panel
+        previewPanel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
 
     // ---------------------------------------------------------------------
@@ -1839,6 +2423,8 @@
             relationshipsDiv));
 
         renderRelationships(relationshipsDiv, relationships, null, logicalName);
+
+        filterInput.focus();
     }
 
     function filterRelationships(relationships, fields, filter) {
@@ -1930,11 +2516,20 @@
         document.head.appendChild(el('script', { type: 'text/javascript', src: chrome.runtime.getURL(path), on: onLoad ? { load: onLoad } : {} }));
     }
 
-    function createMonacoEditorControls(mainPanel, toolbar, recordId, clientdata) {
+    // Adds 'edit flow' to the actions in the header. It is disabled until the editor has loaded:
+    // the editor runs in the page context (initMonaco.js), which activates the link and handles its clicks.
+    function createMonacoEditorControls(mainPanel, header, recordId, clientdata) {
         if (checkIfJsonViewerEnabled()) {
-            toolbar.append(el('button', { type: 'button', disabled: true }, 'Currently, editing Flows is only possible in Chrome. Work in progress.'));
+            header.readActions.append(el('span', { className: 'muted', title: 'Currently, editing Flows is only possible in Chrome. Work in progress.' }, 'edit flow'));
             return;
         }
+
+        header.readActions.append(el('a', {
+            className: 'editFlowLink disabled',
+            href: '#',
+            title: 'Loading the flow editor…',
+            on: { click: (e) => e.preventDefault() }
+        }, 'edit flow'));
 
         // the editor runs in the page context, pass the data it needs through the dataset
         Object.assign(mainPanel.dataset, {
@@ -1981,6 +2576,13 @@
             style.remove();
         }
 
+        // a row with a very long text which is cut off: the field directly, the primary name (in bold), or the name of a lookup while editing
+        const longRow = [
+            '.pfwa-row:has(> .longValue:not(.showingAll))',
+            '.pfwa-row:has(> b > .longValue:not(.showingAll))',
+            '.editing .pfwa-row:has(> .lookupEdit > .longValue:not(.showingAll))',
+        ].join(', ');
+
         document.head.appendChild(el('style', { id: 'pfwaStyles', type: 'text/css' }, `
             body {
                 font-size: 13px !important;
@@ -2003,24 +2605,187 @@
                 padding-left: 3ch;
             }
 
+            /* the header: a line which sticks to the top of the panel, what is shown on the left, the actions on the page on the right */
             .pfwa-toolbar {
-                position: absolute;
-                top: 20px;
-                right: 28px;
+                position: sticky;
+                top: 0;
+                z-index: 10;
                 display: flex;
-                flex-direction: row-reverse;
-                gap: 18px;
+                flex-wrap: wrap; /* in a narrow panel the actions move below what is shown, instead of out of view */
+                align-items: baseline;
+                gap: 2px 3ch;
+                margin: -10px -10px 6px;
+                padding: 8px 10px 6px;
+                background: white;
+                border-bottom: 1px solid rgba(128, 128, 128, 0.4);
             }
 
-            .pfwa-toolbar button {
-                height: 30px;
-                min-width: 122px;
-                padding: 0 4px;
-                cursor: pointer;
+            .headerActions {
+                margin-left: auto;
             }
 
-            .pfwa-toolbar button:disabled {
-                cursor: default;
+            /* what is shown on the left takes the space next to the actions, and a long text is cut off with '…'.
+               Only when even 20 characters do not fit, the actions move below it */
+            .headerContext {
+                flex: 1 1 20ch;
+                min-width: 0;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+            }
+
+            /* plain inline text, so that the '…' cuts off the name itself instead of hiding it as a whole */
+            .headerContext .field, .headerContext .field > * {
+                display: inline;
+            }
+
+            /* while editing, below the line: the options, the impersonation inputs and the changes to commit */
+            .headerBody {
+                flex-basis: 100%;
+            }
+
+            .headerBody > * {
+                margin-top: 4px;
+            }
+
+            /* a long list of changes scrolls, so the header does not cover the whole panel */
+            .previewChangesDiv {
+                max-height: 40vh;
+                overflow: auto;
+            }
+
+            .previewChangesDiv:empty {
+                display: none;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .pfwa-toolbar {
+                    background: #28282B;
+                }
+            }
+
+            /* the read parts are shown normally, the edit parts while editing */
+            .editing .readOnly, .pfwa-root:not(.editing) .editOnly {
+                display: none !important;
+            }
+
+            /* actions are separated with ' · ', drawn here so that a hidden action takes its separator with it */
+            .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden) {
+                position: relative;
+                margin-left: 3ch;
+            }
+
+            /* drawn in the gap in front of the action, outside of it, so it is not underlined and clicking it does not click the action */
+            .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden)::before {
+                content: '·';
+                position: absolute;
+                left: -3ch;
+                width: 3ch;
+                text-align: center;
+                color: gray;
+                pointer-events: none;
+            }
+
+            /* the same dot between other parts, e.g. the table name and the primary name in the header */
+            .separator {
+                display: inline-block;
+                width: 3ch;
+                text-align: center;
+                color: gray;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .actions > :not(.pfwa-hidden) ~ :not(.pfwa-hidden)::before, .separator {
+                    color: #8c8c8c;
+                }
+            }
+
+            /* actions after a value on the same line */
+            .inlineActions, .lookupEditLinks {
+                margin-left: 2ch;
+            }
+
+            /* secondary text, e.g. the row count in the header */
+            .muted {
+                color: gray;
+            }
+
+            a.dangerLink {
+                color: firebrick;
+            }
+
+            /* the actions which save, bold so they draw the eye (and in dark mode in the yellow of the logo) */
+            a.primaryLink {
+                font-weight: bold;
+            }
+
+            /* every active link or action changes colour on hover. In light mode to a deep, saturated blue,
+               and delete to pure red. In dark mode it gets lighter, see below */
+            a[href]:not(.busy, .disabled):hover {
+                color: #0000aa;
+            }
+
+            a.dangerLink[href]:not(.busy, .disabled):hover {
+                color: #ff0000;
+            }
+
+            button:not(:disabled):hover {
+                filter: brightness(0.92);
+            }
+
+            /* links which open a new tab get the familiar icon, drawn in the colour of the link */
+            a[target="_blank"][href]::after {
+                content: '';
+                display: inline-block; /* not underlined with the link */
+                width: 0.8em;
+                height: 0.8em;
+                margin-left: 0.25em;
+                vertical-align: -0.05em;
+                background-color: currentColor;
+                -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z'/%3E%3C/svg%3E") no-repeat center / contain;
+                mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z'/%3E%3C/svg%3E") no-repeat center / contain;
+            }
+
+            /* an action which is running or disabled, see actionLink */
+            a.busy, a.disabled, a.dangerLink.busy, a.dangerLink.disabled, a.primaryLink.busy, a.primaryLink.disabled {
+                color: gray;
+                cursor: progress;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .muted {
+                    color: #8c8c8c;
+                }
+
+                a.dangerLink {
+                    color: #ff5c5c;
+                }
+
+                /* the yellow of the logo, softened */
+                a.primaryLink {
+                    color: #e3dc6a;
+                }
+
+                a.busy, a.disabled, a.dangerLink.busy, a.dangerLink.disabled, a.primaryLink.busy, a.primaryLink.disabled {
+                    color: #8c8c8c;
+                }
+
+                a[href]:not(.busy, .disabled):hover {
+                    color: #8ab4f8;
+                }
+
+                a.dangerLink[href]:not(.busy, .disabled):hover {
+                    color: #ff7575;
+                }
+
+                /* the same yellow, paler */
+                a.primaryLink[href]:not(.busy, .disabled):hover {
+                    color: #efeaa0;
+                }
+
+                button:not(:disabled):hover {
+                    filter: brightness(1.6);
+                }
             }
 
             .multiSelectInput {
@@ -2112,11 +2877,10 @@
             .boolean { color: blue; }
             .null { color: magenta; }
             .guid { color: firebrick; }
-            .pf-link { color: blue; }
-            .primarykey { color: tomato; }
+            .primarykey { color: #0000EE; }
 
             @media (prefers-color-scheme: dark) {
-            *:not(svg, .copyButton, path, a) {
+            *:not(svg, path, a) {
                 color: #d3d3d3f2;
             }
 
@@ -2131,7 +2895,6 @@
             .boolean { color: #5bd75b; }
             .null { color: #ae82eb; }
             .guid { color: #5cc3ed; }
-            .pf-link { color: lightblue; }
             .primarykey { color: tomato; }
 
             body {
@@ -2191,47 +2954,100 @@
                 cursor: pointer;
             }
 
-            .panel .field:not(.lookupField), .panel .lookupDisplay {
+            .panel .field:not(.lookupField, .inlineField), .panel .lookupDisplay {
                 margin-right: 24px;
                 padding-right: 16px;
             }
 
-            .copyButton {
-                color: dimgray;
-                display: none;
+            /* the formatted value is secondary to the raw value, so it is dimmed */
+            .field .formattedValue {
+                color: gray;
+            }
+
+            /* the text of a field and the part which is copied keep the color of the field
+               (also in dark mode, where *:not(svg, path, a) would make them gray) */
+            .field .fieldText, .field .copyValue {
+                color: inherit;
+            }
+
+            /* the whole field is clickable, but only the part which is copied is underlined on hover and flashes when copied */
+            .panel:not(.editing) .field:hover .copyValue, .panel:not(.editing) .copyableKey:hover {
+                text-decoration: underline dotted;
+            }
+
+            .panel:not(.editing) .copyableKey {
                 cursor: pointer;
             }
 
+            .field.copied .copyValue, .copyableKey.copied {
+                background: rgba(128, 128, 128, 0.35);
+            }
+
+            /* A very long text is cut off at the edge of the page with '…', followed by 'show all', see createField.
+               Its row becomes a flex row, so the field can shrink to the space left after the column name */
+            ${longRow} {
+                display: flex;
+            }
+
+            :is(${longRow}) > .longValue, :is(${longRow}) > b, :is(${longRow}) > b > .longValue, :is(${longRow}) > .lookupEdit > .longValue {
+                flex: 0 1 auto;
+                min-width: 0;
+            }
+
+            :is(${longRow}) > b {
+                display: flex;
+            }
+
+            .longValue:not(.showingAll) > .fieldText {
+                display: block;
+                min-width: 0;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+            }
+
+            .showAllLink {
+                flex: none;
+                margin-left: 1ch;
+            }
+
+            /* while editing, the editor shows all of the value */
+            .editing .showAllLink {
+                display: none;
+            }
+
+            /* While editing, the editors in such a row become parts of the flex row, so they are laid out as in any other row:
+               an input stays on the line, a block (a textarea, the lookup edit panel) takes a line of its own */
+            .editing :is(${longRow}) {
+                flex-wrap: wrap;
+            }
+
+            .editing :is(${longRow}) > :is(.fieldEditor, .lookupEdit) {
+                display: contents;
+            }
+
+            .editing :is(${longRow}) > :is(.fieldEditor, .lookupEdit) > div {
+                flex-basis: 100%;
+            }
+
+            .editing :is(${longRow}) > .longValue, .editing :is(${longRow}) > b, .editing :is(${longRow}) > .lookupEdit > .longValue {
+                flex: 1 1 0;
+            }
+
+            /* all of a long text, wrapped to the width of the page instead of one very long line */
+            .field.showingAll {
+                display: inline;
+            }
+
+            .field.showingAll > .fieldText {
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+            }
+
             @media (prefers-color-scheme: dark) {
-                .copyButton {
-                    color: darkgray;
+                .field .formattedValue {
+                    color: #8c8c8c;
                 }
-            }
-
-            .panel:not(.editing) .field:hover .copyButton {
-                display: unset;
-            }
-
-            .copyIcon, .copiedIcon {
-                width: 16px;
-                position: absolute;
-                padding-left: 4px;
-            }
-
-            .copiedNotification {
-                display: none;
-            }
-
-            .field.copied .copiedNotification {
-                display: unset;
-            }
-
-            .field.copied .copyIcon {
-                display: none;
-            }
-
-            .copiedText {
-                padding-left: 24px;
             }
 
             /* edit mode */
@@ -2244,7 +3060,7 @@
                 display: unset;
             }
 
-            .editing .lookupDisplay, .editing .deleteRow, .locked .lookupEditLinks {
+            .editing .lookupDisplay, .locked .lookupEditLinks {
                 display: none;
             }
 
@@ -2253,38 +3069,58 @@
                 height: 20px;
             }
 
-            .editing .field.memoField {
-                display: inline;
+            /* a textarea goes on a line of its own below the row (a block breaks out of the line), with an empty line below it */
+            .memoEditor {
+                padding-bottom: 1lh;
             }
 
-            .editing .field.memoField textarea {
+            .memoEditor textarea {
                 display: block;
+            }
+
+            /* the editor goes right after the value, as high as the field (the spacing of the field goes after the editor) */
+            .editing .field:has(+ .fieldEditor), .editing b:has(+ .fieldEditor) > .field {
+                margin-right: 0;
+                padding-right: 0;
+            }
+
+            .editing .fieldEditor:not(:has(> .memoEditor)) {
+                display: inline-flex;
+                height: 20px;
+                vertical-align: top;
+                margin-right: 24px;
+                padding-right: 16px;
+            }
+
+            /* the line of a memo value is not raised, so the textarea follows right below it */
+            .editing .field:has(+ .fieldEditor > .memoEditor), .editing b:has(+ .fieldEditor > .memoEditor) > .field {
+                height: auto;
             }
 
             .editing .lookupField {
                 margin: 1px 0 -2px 0;
             }
 
-            .checkBoxDiv {
-                display: flex;
-                padding: 1px 0 1px 1ch;
-                align-items: center;
+            /* the edit options, the first line of the main row while editing, e.g. '[x] preview changes  [ ] bypass plugins' */
+            .editOption {
+                margin-right: 2ch;
+                cursor: pointer;
             }
 
-            .panel .checkBoxDiv input {
-                width: 25px;
+            .panel .editOption input {
+                cursor: pointer; /* checkboxes don't inherit the cursor of their label */
+                width: auto;
+                margin: 0 4px 0 0;
+                vertical-align: -2px;
             }
 
-            .impersonateDiv > div, .lookupEditRow, .makeLookupNullDiv {
+            /* while the changes are previewed, the options are disabled */
+            .locked .editOption, .panel .editOption input:disabled {
+                cursor: default;
+            }
+
+            .lookupEditRow, .makeLookupNullDiv {
                 padding-left: 3ch;
-            }
-
-            .editMenuAction, .saveInProgressDiv {
-                padding-left: 1ch;
-            }
-
-            .lookupEditLinks .pf-link {
-                margin-left: 3ch;
             }
 
             .lookupSelectTable {
@@ -2295,15 +3131,71 @@
                 margin-left: 10px;
             }
 
-            /* changes preview table */
+            /* row search dropdown of the lookup and impersonation inputs */
+
+            .recordSearch {
+                position: relative;
+                display: inline-block;
+            }
+
+            .recordSearchResults {
+                position: absolute;
+                top: 100%;
+                left: 8px;
+                z-index: 40;
+                min-width: 300px;
+                max-width: 600px;
+                background: white;
+                border: 1px solid #a0a0a0;
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+            }
+
+            .recordSearchItem {
+                padding: 3px 6px;
+                cursor: pointer;
+            }
+
+            .recordSearchItem.active {
+                background: #dde7f5;
+            }
+
+            .recordSearchName, .recordSearchDetail {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .recordSearchDetail {
+                font-size: 11px;
+                opacity: 0.7;
+            }
+
+            .recordSearchEmpty {
+                padding: 3px 6px;
+                font-style: italic;
+                opacity: 0.7;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .recordSearchResults {
+                    background: #131313;
+                    border-color: #444;
+                }
+
+                .recordSearchItem.active {
+                    background: #2f3a4d;
+                }
+            }
+
+            /* changes preview table, in the header */
 
             .panel table {
                 color: black;
-                margin: 1.2em 0 1.2em 26px;
+                margin: 0;
                 border-collapse: collapse;
                 border: 1px solid black;
                 table-layout: fixed;
-                width: 98%;
+                width: 100%;
             }
 
             .panel thead td {
@@ -2325,21 +3217,19 @@
                 display:block;
             }
 
-            .mainPanel, .previewPanel {
-                position: relative;
-            }
-
             .bodyPreviewed {
                 display: inline-flex;
                 margin-top: 0px;
                 margin-bottom: 0px;
             }
 
+            /* side by side panels which scroll independently, so their toolbars stay in view */
             .prePreviewed {
                 width: 48vw;
                 overflow-x: scroll !important;
                 overflow-y: scroll !important;
-                height: 100%;
+                height: 100vh;
+                box-sizing: border-box;
                 margin: 0px;
             }
 
@@ -2370,6 +3260,8 @@
             }
             `));
     }
+
+    document.addEventListener('mouseover', showCopyTooltip);
 
     await makeItPretty();
 })()
