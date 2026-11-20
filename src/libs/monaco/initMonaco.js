@@ -133,6 +133,7 @@
         saveFlowButton.disabled = true;
         saveFlowButton.textContent = 'Saving...';
 
+        // apiUrl is the absolute url of the Web Api of this page, see prettifyWebApi.js
         const requestUrl = mainPanel.dataset.apiUrl + 'workflows(' + mainPanel.dataset.recordId + ')';
 
         const response = await fetch(requestUrl, {
