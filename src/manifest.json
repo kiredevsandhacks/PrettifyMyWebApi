@@ -1,7 +1,7 @@
 {
     "name": "PrettifyMyWebApi for Microsoft Dataverse",
-    "version": "1.2.0.0",
-    "description": "Open any row in the Dataverse Web Api and supercharge the output. Press to impress your coworkers!",
+    "version": "1.2.0.1",
+    "description": "Open any row in the Dataverse/Dynamics 365 Web Api with pretty output. Edit and create rows. Quickly edit Power Automate Flows.",
     "manifest_version": 3,
     "author": "Erik Donker",
     "background": {
